@@ -1,77 +1,86 @@
-# Sinky Technical Challenge - Full Stack Senior Engineer
+# Smart To-Do List AI-Powered
 
-## 🚀 O Desafio: Smart To-Do List (AI-Powered)
+Full-stack technical challenge built with NestJS, Next.js, SQLite, Swagger and Docker Compose.
 
-Este desafio visa avaliar suas habilidades como **Engenheiro(a) Full-Stack Sênior** na construção de uma aplicação moderna, funcional e resiliente. O objetivo é desenvolver uma **"Smart To-Do List"**: uma lista de tarefas que integra Inteligência Artificial para decompor objetivos de alto nível (ex: "Planejar uma viagem") em subtarefas acionáveis.
+The app lets users manage tasks manually and ask an OpenAI-compatible LLM provider to break a high-level goal into actionable tasks. API keys are entered in the UI for each AI request and are never stored by the app.
 
----
+## Stack
 
-## 🛠 Stacks Tecnológicas e Requisitos
+- Backend: NestJS, TypeScript, TypeORM, SQLite, Swagger
+- Frontend: Next.js App Router, TypeScript, SWR
+- Infra: Docker Compose, Node.js 22
+- Tests: Jest unit tests for backend business logic and AI parsing/error paths
 
-### 1. Backend: NestJS com TypeScript
+## Running With Docker
 
-O backend será o cérebro da aplicação, responsável pela lógica de negócios, persistência e comunicação com a IA.
+```bash
+cp .env.example .env
+docker compose up --build
+```
 
-* **Lógica de Negócios:** Implementar o gerenciamento completo do ciclo de vida de tarefas:
-* Criação, Leitura/Listagem, Atualização (ex: marcar como concluída) e Exclusão.
+Then open:
 
+- Web app: http://localhost:3000
+- API: http://localhost:3001
+- Swagger: http://localhost:3001/docs
 
-* **Persistência de Dados:** Utilizar **SQLite** para garantir portabilidade. O modelo da tarefa deve incluir, no mínimo: `id`, `title`, `isCompleted`, `createdAt` e um campo identificando se foi gerada por IA.
-* **Integração com IA:**
-* Desenvolver um endpoint que receba um prompt/objetivo do usuário.
-* Comunicar-se com uma API de Inferência de LLM (Hugging Face, OpenRouter, OpenAI ou similar).
-* **Prompt Engineering:** Enviar o prompt de forma estruturada para garantir uma resposta processável (ex: JSON).
-* Processar a resposta, extrair as tarefas e persisti-las automaticamente no banco de dados.
-* **Segurança:** Deixe um campo disponível para inserir a API Key do provedor; **não** compartilhe sua chave no código.
+## Running Locally
 
+```bash
+npm install
+npm run dev:api
+npm run dev:web
+```
 
+The API runs on `http://localhost:3001` and the web app on `http://localhost:3000`.
 
-### 2. Frontend: Next.js com TypeScript
+## Environment
 
-A interface deve ser reativa, intuitiva e consumir a API criada.
+Copy `.env.example` to `.env` for Docker, or export variables locally as needed.
 
-* **Gerenciamento de Estado:** Exibir e gerenciar a lista de tarefas de forma eficiente, refletindo criações e atualizações em tempo real sem recarregar a página.
-* **Interatividade:**
-* Formulário para criação manual de tarefas.
-* Ações para marcar/desmarcar conclusão e deletar tarefas.
+```bash
+PORT=3001
+CORS_ORIGIN=http://localhost:3000
+SQLITE_PATH=./data/smart-todos.sqlite
+LLM_BASE_URL=https://openrouter.ai/api/v1
+LLM_MODEL=openai/gpt-4o-mini
+LLM_TIMEOUT_MS=20000
+NEXT_PUBLIC_API_URL=http://localhost:3001
+```
 
+To use OpenAI directly, set:
 
-* **Funcionalidade de IA:**
-* Interface clara com campo de texto e botão para descrever o objetivo, além de um campo para adicionar a API Key do provedor.
-* **UX de Latência:** Implementar **Loading States** claros e feedbacks visuais enquanto a IA processa a requisição.
+```bash
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_MODEL=gpt-4o-mini
+```
 
+The LLM API key is intentionally not configured in `.env`; it is provided in the web form and sent only with the AI generation request.
 
+## API
 
----
+- `GET /tasks`: list tasks
+- `POST /tasks`: create a manual task
+- `PATCH /tasks/:id`: update title or completion status
+- `DELETE /tasks/:id`: delete a task
+- `POST /tasks/ai-generate`: generate and persist AI-created tasks
 
-## 🏗 Engenharia e Qualidade (Critérios de Elite)
+Swagger documentation is available at `/docs`.
 
-Para este nível de posição, avaliaremos a maturidade da sua engenharia:
+## Quality Checks
 
-1. **Arquitetura:** Separação clara de responsabilidades (Controllers, Services, Providers/Modules).
-2. **Resiliência:** Tratamento de erros para falhas na API de IA (timeouts ou respostas inválidas).
-3. **Documentação:** Uso de **Swagger** para documentar os endpoints da API.
-4. **Testes:** Implementação de testes unitários para a lógica de negócio principal no backend.
-5. **Docker:** O projeto deve conter um `docker-compose.yml` para rodar a stack completa (Front + Back) com um único comando.
+```bash
+npm --prefix apps/api test
+npm --prefix apps/api run build
+npm --prefix apps/web run lint
+npm --prefix apps/web run build
+```
 
----
+## Decisions And Trade-Offs
 
-## 📐 Critérios de Avaliação
-
-1. **Qualidade do Código:** SOLID, Clean Code e tipagem forte (TypeScript).
-2. **Robustez:** Como o sistema lida com o "não determinismo" e falhas de APIs de IA.
-3. **Domínio Técnico:** Uso idiomático das ferramentas (NestJS e Next.js).
-4. **UX Consciente:** Feedback de erros e estados de espera para o usuário.
-
----
-
-## 📤 Entrega
-
-1. Repositório público no GitHub (ou privado com acesso liberado).
-2. `README.md` com instruções de execução e uma breve explicação das decisões técnicas e trade-offs realizados.
-
-### Dica
-
-Na Sinky, valorizamos o pragmatismo. Se você precisar tomar uma decisão de arquitetura para ganhar tempo ou garantir performance, sinta-se à vontade para fazê-lo, desde que explique o seu raciocínio no README da entrega. Queremos entender como você pensa e como prioriza trade-offs.
-
----
+- TypeORM with SQLite was chosen for a fast, idiomatic NestJS implementation with portable persistence. The app uses `synchronize` for challenge ergonomics; production should use explicit migrations.
+- The LLM integration targets the OpenAI chat-completions shape so OpenRouter and OpenAI can be swapped by changing `LLM_BASE_URL` and `LLM_MODEL`.
+- The AI response is treated as untrusted: the backend requests strict JSON, strips common code fences, validates the shape, deduplicates titles, limits generated tasks and refuses to persist anything when parsing fails.
+- API keys are not stored in SQLite, localStorage or server config. This keeps the challenge safe to run and review without leaking secrets.
+- The workspace uses `legacy-peer-deps=true` so npm does not install unused vulnerable optional peers such as the `sqlite3` driver; the app uses `better-sqlite3` explicitly.
+- `npm audit --omit=dev` still reports moderate transitive advisories in framework-pinned dependencies (`next -> postcss` and `typeorm -> uuid`). Forcing those fixes currently downgrades major packages, so they are documented rather than overridden unsafely.
