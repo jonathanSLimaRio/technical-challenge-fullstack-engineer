@@ -14,7 +14,6 @@ The app lets users manage tasks manually and ask an OpenAI-compatible LLM provid
 ## Running With Docker
 
 ```bash
-cp .env.example .env
 docker compose up --build
 ```
 
@@ -24,15 +23,21 @@ Then open:
 - API: http://localhost:3001
 - Swagger: http://localhost:3001/docs
 
+The compose file includes local defaults. Copy `.env.example` to `.env` only if
+you want to customize ports, CORS, SQLite path or LLM provider settings.
+
 ## Running Locally
 
 ```bash
-npm install
+npm --prefix apps/api install
+npm --prefix apps/web install
 npm run dev:api
 npm run dev:web
 ```
 
 The API runs on `http://localhost:3001` and the web app on `http://localhost:3000`.
+Open the app in two browser tabs to see task changes sync in real time through
+WebSocket events.
 
 ## Environment
 
