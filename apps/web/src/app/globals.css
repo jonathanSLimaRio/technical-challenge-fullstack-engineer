@@ -210,6 +210,62 @@ h3 {
   gap: 12px;
 }
 
+.tooltip-wrap {
+  position: relative;
+  display: inline-flex;
+  min-width: 0;
+}
+
+.tooltip-fill {
+  display: block;
+  width: 100%;
+}
+
+.tooltip-control {
+  display: inline-flex;
+}
+
+.tooltip-bubble {
+  position: absolute;
+  z-index: 20;
+  bottom: calc(100% + 8px);
+  left: 50%;
+  width: max-content;
+  max-width: min(260px, 80vw);
+  padding: 7px 9px;
+  border: 1px solid rgba(15, 23, 42, 0.18);
+  border-radius: 8px;
+  background: #111827;
+  color: #ffffff;
+  font-size: 0.76rem;
+  font-weight: 720;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease;
+}
+
+.tooltip-end .tooltip-bubble {
+  right: 0;
+  left: auto;
+  transform: translateY(4px);
+}
+
+.tooltip-wrap:hover .tooltip-bubble,
+.tooltip-wrap:focus-within .tooltip-bubble {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+
+.tooltip-end:hover .tooltip-bubble,
+.tooltip-end:focus-within .tooltip-bubble {
+  transform: translateY(0);
+}
+
 .field-group {
   gap: 8px;
 }
@@ -266,7 +322,9 @@ textarea::placeholder {
 
 input:focus,
 textarea:focus,
-button:focus-visible {
+button:focus-visible,
+.metric-card:focus-visible,
+.sync-pill:focus-visible {
   outline: none;
   border-color: var(--blue);
   box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15);
@@ -367,6 +425,92 @@ button:focus-visible {
   opacity: 0.56;
 }
 
+.tooltip-wrap {
+  position: relative;
+  display: inline-grid;
+  min-width: 0;
+}
+
+.tooltip-fill {
+  display: block;
+  width: 100%;
+}
+
+.tooltip-control {
+  display: inline-grid;
+}
+
+.tooltip-fill > input,
+.tooltip-fill > textarea,
+.tooltip-fill > button,
+.tooltip-fill > .filter-tab,
+.tooltip-fill > .metric-card {
+  width: 100%;
+}
+
+.tooltip-bubble {
+  position: absolute;
+  right: auto;
+  bottom: calc(100% + 10px);
+  left: 50%;
+  z-index: 20;
+  width: max-content;
+  max-width: min(280px, calc(100vw - 32px));
+  padding: 8px 10px;
+  border: 1px solid rgba(15, 23, 42, 0.14);
+  border-radius: 8px;
+  background: #111827;
+  box-shadow: 0 14px 28px rgba(15, 23, 42, 0.18);
+  color: #ffffff;
+  font-size: 0.78rem;
+  font-weight: 720;
+  line-height: 1.35;
+  opacity: 0;
+  pointer-events: none;
+  text-align: left;
+  transform: translate(-50%, 4px);
+  transition:
+    opacity 140ms ease,
+    transform 140ms ease,
+    visibility 140ms ease;
+  visibility: hidden;
+}
+
+.tooltip-bubble::after {
+  position: absolute;
+  top: 100%;
+  left: 50%;
+  width: 10px;
+  height: 10px;
+  background: #111827;
+  content: "";
+  transform: translate(-50%, -5px) rotate(45deg);
+}
+
+.tooltip-end .tooltip-bubble {
+  right: 0;
+  left: auto;
+  transform: translateY(4px);
+}
+
+.tooltip-end .tooltip-bubble::after {
+  right: 16px;
+  left: auto;
+  transform: translateY(-5px) rotate(45deg);
+}
+
+.tooltip-wrap:hover > .tooltip-bubble,
+.tooltip-wrap:focus-within > .tooltip-bubble {
+  opacity: 1;
+  transform: translate(-50%, 0);
+  visibility: visible;
+}
+
+.tooltip-end:hover > .tooltip-bubble,
+.tooltip-end:focus-within > .tooltip-bubble {
+  transform: translateY(0);
+}
+
 .task-area {
   min-width: 0;
 }
@@ -386,11 +530,24 @@ button:focus-visible {
   box-shadow: var(--shadow-tiny);
 }
 
-.metric-card span {
+.metric-card-header {
+  display: inline-flex;
+  gap: 7px;
+  align-items: center;
   color: var(--muted);
   font-size: 0.78rem;
   font-weight: 790;
   text-transform: uppercase;
+}
+
+.metric-card-header {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+}
+
+.metric-card-header svg {
+  color: currentColor;
 }
 
 .metric-card strong {
@@ -569,8 +726,11 @@ button:focus-visible {
 }
 
 .text-button {
+  display: inline-flex;
   min-height: 32px;
   margin-left: auto;
+  align-items: center;
+  gap: 6px;
   border: 1px solid rgba(220, 38, 38, 0.24);
   background: #ffffff;
   color: var(--red);
@@ -580,6 +740,14 @@ button:focus-visible {
 
 .text-button:hover {
   background: #fff7f7;
+}
+
+.feedback-action {
+  margin-left: auto;
+}
+
+.feedback-action .text-button {
+  margin-left: 0;
 }
 
 .list-state {
@@ -801,6 +969,12 @@ button:focus-visible {
   }
 }
 
+@media (hover: none) {
+  .tooltip-bubble {
+    display: none;
+  }
+}
+
 @media (max-width: 980px) {
   .app-shell {
     width: min(100% - 28px, 760px);
@@ -886,7 +1060,7 @@ button:focus-visible {
     grid-template-columns: 42px minmax(0, 1fr);
   }
 
-  .task-card > .icon-button,
+  .task-card > .tooltip-control:last-child,
   .confirm-actions {
     grid-column: 2;
     justify-self: end;

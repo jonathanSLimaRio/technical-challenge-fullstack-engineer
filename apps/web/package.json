@@ -6,7 +6,10 @@
     "build": "next build",
     "dev": "next dev --hostname 0.0.0.0 --port 3000",
     "lint": "eslint . --max-warnings=0",
-    "start": "next start --hostname 0.0.0.0 --port 3000"
+    "start": "next start --hostname 0.0.0.0 --port 3000",
+    "build:e2e": "node scripts/build-e2e.mjs",
+    "start:e2e": "next start --hostname 127.0.0.1 --port 3100",
+    "test:e2e": "npm run build:e2e && playwright test"
   },
   "dependencies": {
     "lucide-react": "^1.11.0",
@@ -17,6 +20,7 @@
     "swr": "^2.4.1"
   },
   "devDependencies": {
+    "@playwright/test": "^1.59.1",
     "@types/node": "^25.6.0",
     "@types/react": "^19.2.14",
     "@types/react-dom": "^19.2.3",

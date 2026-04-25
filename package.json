@@ -7,6 +7,7 @@
     "dev:web": "npm --prefix apps/web run dev",
     "build": "npm --prefix apps/api run build && npm --prefix apps/web run build",
     "test": "npm --prefix apps/api test",
+    "test:e2e": "npm --prefix apps/web run test:e2e",
     "lint": "npm --prefix apps/web run lint"
   },
   "engines": {
