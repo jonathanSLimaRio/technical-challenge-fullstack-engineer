@@ -8,10 +8,13 @@
     "lint": "eslint . --max-warnings=0",
     "start": "next start --hostname 0.0.0.0 --port 3000",
     "build:e2e": "node scripts/build-e2e.mjs",
-    "start:e2e": "next start --hostname 127.0.0.1 --port 3100",
+    "start:e2e": "node .next-e2e/standalone/server.js",
     "test:e2e": "npm run build:e2e && playwright test"
   },
   "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
     "lucide-react": "^1.11.0",
     "next": "^16.2.4",
     "react": "^19.2.5",

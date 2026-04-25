@@ -1,23 +1,44 @@
 'use client';
 
 import {
+  closestCenter,
+  DndContext,
+  KeyboardSensor,
+  PointerSensor,
+  type DragEndEvent,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  useSortable,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
+import {
   AlertCircle,
   BarChart3,
   CheckCircle2,
   Circle,
   Clock3,
-  KeyRound,
+  FileText,
+  GripVertical,
   LayoutList,
   Loader2,
+  Moon,
   Plus,
   RefreshCw,
-  ShieldCheck,
+  Save,
   Sparkles,
+  Sun,
+  Tag,
   Trash2,
   Wand2,
   X,
 } from 'lucide-react';
-import type { FormEvent, ReactNode } from 'react';
+import type { CSSProperties, FormEvent, ReactNode } from 'react';
 import { useEffect, useId, useMemo, useState } from 'react';
 import { io } from 'socket.io-client';
 import useSWR from 'swr';
@@ -28,44 +49,58 @@ import {
   fetchTasks,
   generateTasks,
   getApiOrigin,
+  reorderTasks,
   updateTask,
 } from '../lib/api';
 import type { Task } from '../types/task';
-
-type Feedback = {
-  type: 'error' | 'success';
-  message: string;
-};
+import { ToastViewport, useToastQueue } from './toast';
+import type { Theme } from './theme';
+import { useThemePreference } from './use-theme-preference';
 
 type TaskFilter = 'all' | 'pending' | 'done' | 'ai';
 
 const GOAL_MAX_LENGTH = 500;
+const TASK_DESCRIPTION_MAX_LENGTH = 1000;
+const TASK_LABEL_MAX_LENGTH = 40;
 const TASK_MAX_LENGTH = 160;
 
 const tooltipCopy = {
-  addTask: 'Save this manual task in the execution queue.',
-  aiFilter: 'Show tasks created by AI.',
-  apiKey: 'Used only for this generation request and never stored by the app.',
-  cancelDelete: 'Keep this task and close confirmation.',
-  completionMetric: 'Percentage of tasks marked complete.',
-  confirmDelete: 'Permanently remove this task.',
-  deleteTask: 'Ask for confirmation before deleting this task.',
-  doneFilter: 'Show completed tasks only.',
-  doneMetric: 'Tasks already marked complete.',
-  generateTasks: 'Create and save AI-suggested tasks from this goal.',
-  goal: 'Describe one concrete outcome. AI turns it into saved tasks.',
-  markDone: 'Mark this task as complete.',
-  markPending: 'Move this task back to pending.',
-  pendingFilter: 'Show open tasks only.',
-  pendingMetric: 'Tasks still waiting to be completed.',
-  refresh: 'Reload tasks from the API.',
-  retry: 'Reload tasks from the API.',
-  showAll: 'Show every task.',
-  syncOffline: 'Realtime connection is offline; refresh manually if needed.',
-  syncOnline: 'New task changes are syncing in real time.',
-  taskTitle: 'Write one small task to add manually.',
-  totalFilter: 'Show every task.',
-  totalMetric: 'Count of all saved tasks.',
+  addTask: 'Salvar esta tarefa manual na fila de execução.',
+  aiFilter: 'Mostrar tarefas criadas pela IA.',
+  cancelDelete: 'Manter esta tarefa e fechar a confirmação.',
+  completionMetric: 'Percentual de tarefas marcadas como concluídas.',
+  confirmDelete: 'Remover esta tarefa permanentemente.',
+  deleteTask: 'Pedir confirmação antes de excluir esta tarefa.',
+  doneFilter: 'Mostrar apenas tarefas concluídas.',
+  doneMetric: 'Tarefas já marcadas como concluídas.',
+  dragTask: 'Arrastar para reordenar a fila de execução.',
+  editTask: 'Abrir detalhes para editar descrição e etiqueta.',
+  generateTasks:
+    'Criar e salvar tarefas sugeridas pela IA a partir deste objetivo.',
+  goal: 'Descreva um resultado concreto. A IA transforma isso em tarefas salvas.',
+  markDone: 'Marcar esta tarefa como concluída.',
+  markPending: 'Mover esta tarefa de volta para pendente.',
+  pendingFilter: 'Mostrar apenas tarefas em aberto.',
+  pendingMetric: 'Tarefas ainda aguardando conclusão.',
+  refresh: 'Recarregar tarefas da API.',
+  retry: 'Recarregar tarefas da API.',
+  showAll: 'Mostrar todas as tarefas.',
+  syncOffline:
+    'A conexão em tempo real está offline; atualize manualmente se precisar.',
+  syncOnline: 'As alterações nas tarefas estão sincronizando em tempo real.',
+  taskTitle: 'Escreva uma pequena tarefa para adicionar manualmente.',
+  themeDark: 'Usar o tema dark.',
+  themeLight: 'Usar o tema light.',
+  totalFilter: 'Mostrar todas as tarefas.',
+  totalMetric: 'Contagem de todas as tarefas salvas.',
+  updateTaskDetails: 'Salvar descrição e etiqueta desta tarefa.',
+};
+
+const emptyFilterTitles: Record<TaskFilter, string> = {
+  ai: 'Nenhuma tarefa da IA',
+  all: 'Nenhuma tarefa',
+  done: 'Nenhuma tarefa concluída',
+  pending: 'Nenhuma tarefa pendente',
 };
 
 const describedBy = (
@@ -77,7 +112,7 @@ const describedBy = (
     : tooltipId;
 
 function formatDate(value: string): string {
-  return new Intl.DateTimeFormat('en', {
+  return new Intl.DateTimeFormat('pt-BR', {
     day: '2-digit',
     hour: '2-digit',
     minute: '2-digit',
@@ -90,7 +125,7 @@ function getErrorMessage(error: unknown): string {
     return error.message;
   }
 
-  return 'Something went wrong. Please try again.';
+  return 'Algo deu errado. Tente novamente.';
 }
 
 function getFilteredTasks(tasks: Task[], filter: TaskFilter): Task[] {
@@ -109,6 +144,40 @@ function getFilteredTasks(tasks: Task[], filter: TaskFilter): Task[] {
   return tasks;
 }
 
+function getReorderedTaskIds(
+  tasks: Task[],
+  visibleTasks: Task[],
+  activeId: string,
+  overId: string,
+): string[] {
+  const visibleIds = visibleTasks.map((task) => task.id);
+  const activeIndex = visibleIds.indexOf(activeId);
+  const overIndex = visibleIds.indexOf(overId);
+
+  if (activeIndex < 0 || overIndex < 0) {
+    return tasks.map((task) => task.id);
+  }
+
+  const reorderedVisibleIds = arrayMove(visibleIds, activeIndex, overIndex);
+  const visibleIdSet = new Set(visibleIds);
+  let nextVisibleIndex = 0;
+
+  return tasks.map((task) => {
+    if (!visibleIdSet.has(task.id)) {
+      return task.id;
+    }
+
+    return reorderedVisibleIds[nextVisibleIndex++];
+  });
+}
+
+function getNormalizedTaskDetails(description: string, label: string) {
+  return {
+    description: description.trim(),
+    label: label.trim().replace(/\s+/g, ' '),
+  };
+}
+
 export function SmartTodoApp() {
   const {
     data: tasks = [],
@@ -118,7 +187,6 @@ export function SmartTodoApp() {
   } = useSWR<Task[]>('tasks', fetchTasks);
   const [manualTitle, setManualTitle] = useState('');
   const [goal, setGoal] = useState('');
-  const [apiKey, setApiKey] = useState('');
   const [activeFilter, setActiveFilter] = useState<TaskFilter>('all');
   const [isCreating, setIsCreating] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -126,8 +194,24 @@ export function SmartTodoApp() {
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
     null,
   );
-  const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editDescription, setEditDescription] = useState('');
+  const [editLabel, setEditLabel] = useState('');
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
+  const [isReordering, setIsReordering] = useState(false);
+  const [isSavingTaskDetails, setIsSavingTaskDetails] = useState(false);
+  const [theme, setThemePreference] = useThemePreference();
+  const { dismissToast, showToast, toasts } = useToastQueue();
+  const sensors = useSensors(
+    useSensor(PointerSensor, {
+      activationConstraint: {
+        distance: 6,
+      },
+    }),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    }),
+  );
 
   const stats = useMemo(() => {
     const completed = tasks.filter((task) => task.isCompleted).length;
@@ -148,34 +232,38 @@ export function SmartTodoApp() {
     () => getFilteredTasks(tasks, activeFilter),
     [activeFilter, tasks],
   );
+  const filteredTaskIds = useMemo(
+    () => filteredTasks.map((task) => task.id),
+    [filteredTasks],
+  );
 
   const filters = useMemo(
     () => [
       {
         count: stats.total,
         icon: <LayoutList size={16} aria-hidden="true" />,
-        label: 'All',
+        label: 'Todas',
         tooltip: tooltipCopy.totalFilter,
         value: 'all' as const,
       },
       {
         count: stats.pending,
         icon: <Circle size={16} aria-hidden="true" />,
-        label: 'Pending',
+        label: 'Pendentes',
         tooltip: tooltipCopy.pendingFilter,
         value: 'pending' as const,
       },
       {
         count: stats.completed,
         icon: <CheckCircle2 size={16} aria-hidden="true" />,
-        label: 'Done',
+        label: 'Concluídas',
         tooltip: tooltipCopy.doneFilter,
         value: 'done' as const,
       },
       {
         count: stats.aiGenerated,
         icon: <Sparkles size={16} aria-hidden="true" />,
-        label: 'AI',
+        label: 'IA',
         tooltip: tooltipCopy.aiFilter,
         value: 'ai' as const,
       },
@@ -210,8 +298,6 @@ export function SmartTodoApp() {
     }
 
     setIsCreating(true);
-    setFeedback(null);
-
     try {
       const createdTask = await createTask(title);
       setManualTitle('');
@@ -219,9 +305,9 @@ export function SmartTodoApp() {
       await mutate((currentTasks = []) => [createdTask, ...currentTasks], {
         revalidate: false,
       });
-      setFeedback({ type: 'success', message: 'Task created.' });
+      showToast({ type: 'success', message: 'Tarefa criada.' });
     } catch (requestError) {
-      setFeedback({ type: 'error', message: getErrorMessage(requestError) });
+      showToast({ type: 'error', message: getErrorMessage(requestError) });
     } finally {
       setIsCreating(false);
     }
@@ -231,28 +317,24 @@ export function SmartTodoApp() {
     event.preventDefault();
 
     const normalizedGoal = goal.trim();
-    const normalizedApiKey = apiKey.trim();
-
-    if (!normalizedGoal || !normalizedApiKey) {
+    if (!normalizedGoal) {
       return;
     }
 
     setIsGenerating(true);
-    setFeedback(null);
-
     try {
-      const generatedTasks = await generateTasks(normalizedGoal, normalizedApiKey);
+      const generatedTasks = await generateTasks(normalizedGoal);
       setGoal('');
       setActiveFilter('all');
       await mutate((currentTasks = []) => [...generatedTasks, ...currentTasks], {
         revalidate: false,
       });
-      setFeedback({
+      showToast({
         type: 'success',
-        message: `${generatedTasks.length} AI tasks created.`,
+        message: `${generatedTasks.length} tarefas da IA criadas.`,
       });
     } catch (requestError) {
-      setFeedback({ type: 'error', message: getErrorMessage(requestError) });
+      showToast({ type: 'error', message: getErrorMessage(requestError) });
     } finally {
       setIsGenerating(false);
     }
@@ -261,7 +343,6 @@ export function SmartTodoApp() {
   async function handleToggleTask(task: Task) {
     const previousTasks = tasks;
     setPending(task.id, true);
-    setFeedback(null);
 
     await mutate(
       tasks.map((item) =>
@@ -285,7 +366,7 @@ export function SmartTodoApp() {
       );
     } catch (requestError) {
       await mutate(previousTasks, { revalidate: false });
-      setFeedback({ type: 'error', message: getErrorMessage(requestError) });
+      showToast({ type: 'error', message: getErrorMessage(requestError) });
     } finally {
       setPending(task.id, false);
     }
@@ -294,7 +375,6 @@ export function SmartTodoApp() {
   async function handleDeleteTask(task: Task) {
     const previousTasks = tasks;
     setPending(task.id, true);
-    setFeedback(null);
 
     await mutate(
       tasks.filter((item) => item.id !== task.id),
@@ -304,18 +384,116 @@ export function SmartTodoApp() {
     try {
       await deleteTask(task.id);
       setConfirmingDeleteId(null);
-      setFeedback({ type: 'success', message: 'Task deleted.' });
+      showToast({ type: 'success', message: 'Tarefa excluída.' });
     } catch (requestError) {
       await mutate(previousTasks, { revalidate: false });
-      setFeedback({ type: 'error', message: getErrorMessage(requestError) });
+      showToast({ type: 'error', message: getErrorMessage(requestError) });
     } finally {
       setPending(task.id, false);
     }
   }
 
+  function handleOpenTaskDetails(task: Task) {
+    setEditingTask(task);
+    setEditDescription(task.description ?? '');
+    setEditLabel(task.label ?? '');
+  }
+
+  function handleCloseTaskDetails() {
+    if (isSavingTaskDetails) {
+      return;
+    }
+
+    setEditingTask(null);
+  }
+
+  async function handleSaveTaskDetails(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+
+    if (!editingTask) {
+      return;
+    }
+
+    const previousTasks = tasks;
+    const normalizedDetails = getNormalizedTaskDetails(
+      editDescription,
+      editLabel,
+    );
+    const optimisticTask: Task = {
+      ...editingTask,
+      description: normalizedDetails.description || null,
+      label: normalizedDetails.label || null,
+    };
+
+    setIsSavingTaskDetails(true);
+    setPending(editingTask.id, true);
+
+    await mutate(
+      tasks.map((item) => (item.id === editingTask.id ? optimisticTask : item)),
+      { revalidate: false },
+    );
+
+    try {
+      const updatedTask = await updateTask(editingTask.id, normalizedDetails);
+      await mutate(
+        (currentTasks = []) =>
+          currentTasks.map((item) =>
+            item.id === editingTask.id ? updatedTask : item,
+          ),
+        { revalidate: false },
+      );
+      setEditingTask(null);
+      showToast({ type: 'success', message: 'Detalhes da tarefa salvos.' });
+    } catch (requestError) {
+      await mutate(previousTasks, { revalidate: false });
+      showToast({ type: 'error', message: getErrorMessage(requestError) });
+    } finally {
+      setPending(editingTask.id, false);
+      setIsSavingTaskDetails(false);
+    }
+  }
+
+  async function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+
+    if (!over || active.id === over.id || isReordering) {
+      return;
+    }
+
+    const previousTasks = tasks;
+    const orderedIds = getReorderedTaskIds(
+      tasks,
+      filteredTasks,
+      String(active.id),
+      String(over.id),
+    );
+
+    if (orderedIds.every((id, index) => id === tasks[index]?.id)) {
+      return;
+    }
+
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const nextTasks = orderedIds
+      .map((id) => taskById.get(id))
+      .filter((task): task is Task => Boolean(task));
+
+    setIsReordering(true);
+    await mutate(nextTasks, { revalidate: false });
+
+    try {
+      const reorderedTasks = await reorderTasks(orderedIds);
+      await mutate(reorderedTasks, { revalidate: false });
+      showToast({ type: 'success', message: 'Fila reordenada.' });
+    } catch (requestError) {
+      await mutate(previousTasks, { revalidate: false });
+      showToast({ type: 'error', message: getErrorMessage(requestError) });
+    } finally {
+      setIsReordering(false);
+    }
+  }
+
   function handleStartDelete(taskId: string) {
     setConfirmingDeleteId(taskId);
-    setFeedback(null);
   }
 
   function setPending(id: string, isPending: boolean) {
@@ -340,34 +518,38 @@ export function SmartTodoApp() {
             <Sparkles size={20} />
           </span>
           <div>
-            <p className="eyebrow">AI task decomposition</p>
+            <p className="eyebrow">Decomposição de tarefas com IA</p>
             <h1>Smart To-Do List</h1>
           </div>
         </div>
 
-        <p className="header-copy">
-          Break large goals into clean next steps, then keep execution visible
-          from first draft to done.
-        </p>
+        <div className="header-side">
+          <p className="header-copy">
+            Divida grandes objetivos em próximos passos claros e mantenha a
+            execução visível do primeiro rascunho à conclusão.
+          </p>
+
+          <ThemeControl theme={theme} onThemeChange={setThemePreference} />
+        </div>
       </header>
 
       <div className="workspace">
-        <aside className="control-rail" aria-label="Task controls">
+        <aside className="control-rail" aria-label="Controles de tarefas">
           <section className="planner-panel" aria-labelledby="planner-title">
             <div className="panel-heading">
               <span className="panel-icon" aria-hidden="true">
                 <Wand2 size={19} />
               </span>
               <div>
-                <p className="eyebrow">Primary workflow</p>
-                <h2 id="planner-title">Generate a focused plan</h2>
+                <p className="eyebrow">Fluxo principal</p>
+                <h2 id="planner-title">Gerar um plano focado</h2>
               </div>
             </div>
 
             <form className="form-grid" onSubmit={handleGenerateTasks}>
               <div className="field-group">
                 <div className="label-row">
-                  <label htmlFor="goal">Goal</label>
+                  <label htmlFor="goal">Objetivo</label>
                   <span>{goal.length}/{GOAL_MAX_LENGTH}</span>
                 </div>
                 <Tooltip className="tooltip-fill" content={tooltipCopy.goal}>
@@ -377,45 +559,15 @@ export function SmartTodoApp() {
                       id="goal"
                       maxLength={GOAL_MAX_LENGTH}
                       onChange={(event) => setGoal(event.target.value)}
-                      placeholder="Plan a five-day trip to Buenos Aires"
+                      placeholder="Planejar uma viagem de cinco dias a Buenos Aires"
                       rows={6}
                       value={goal}
                     />
                   )}
                 </Tooltip>
                 <p className="field-hint" id="goal-helper">
-                  Use one concrete outcome. The API will create the tasks and
-                  save them here.
-                </p>
-              </div>
-
-              <div className="field-group">
-                <label htmlFor="api-key">Provider API key</label>
-                <div className="key-field">
-                  <KeyRound size={17} aria-hidden="true" />
-                  <Tooltip
-                    className="tooltip-fill"
-                    content={tooltipCopy.apiKey}
-                  >
-                    {(tooltipId) => (
-                      <input
-                        aria-describedby={describedBy(
-                          tooltipId,
-                          'api-key-helper',
-                        )}
-                        autoComplete="new-password"
-                        id="api-key"
-                        onChange={(event) => setApiKey(event.target.value)}
-                        placeholder="sk-or-..."
-                        type="password"
-                        value={apiKey}
-                      />
-                    )}
-                  </Tooltip>
-                </div>
-                <p className="field-hint secure" id="api-key-helper">
-                  <ShieldCheck size={15} aria-hidden="true" />
-                  Sent only with this request. It is not stored by the app.
+                  Use um resultado concreto. A API criará as tarefas e as
+                  salvará aqui.
                 </p>
               </div>
 
@@ -427,7 +579,7 @@ export function SmartTodoApp() {
                   <button
                     aria-describedby={tooltipId}
                     className="button primary wide"
-                    disabled={isGenerating || !goal.trim() || !apiKey.trim()}
+                    disabled={isGenerating || !goal.trim()}
                     type="submit"
                   >
                     {isGenerating ? (
@@ -435,12 +587,45 @@ export function SmartTodoApp() {
                     ) : (
                       <Sparkles size={18} aria-hidden="true" />
                     )}
-                    {isGenerating ? 'Generating plan...' : 'Generate tasks'}
+                    {isGenerating ? 'Gerando plano...' : 'Gerar tarefas'}
                   </button>
                 )}
               </Tooltip>
             </form>
           </section>
+        </aside>
+
+        <section className="task-area" aria-label="Tarefas">
+          <div className="metrics-grid" aria-label="Resumo das tarefas">
+            <MetricCard
+              icon={<LayoutList size={18} aria-hidden="true" />}
+              label="Total"
+              tooltip={tooltipCopy.totalMetric}
+              value={stats.total}
+            />
+            <MetricCard
+              icon={<Circle size={18} aria-hidden="true" />}
+              label="Pendentes"
+              tone="warning"
+              tooltip={tooltipCopy.pendingMetric}
+              value={stats.pending}
+            />
+            <MetricCard
+              icon={<CheckCircle2 size={18} aria-hidden="true" />}
+              label="Concluídas"
+              tone="success"
+              tooltip={tooltipCopy.doneMetric}
+              value={stats.completed}
+            />
+            <MetricCard
+              icon={<BarChart3 size={18} aria-hidden="true" />}
+              label="Conclusão"
+              suffix="%"
+              tone="accent"
+              tooltip={tooltipCopy.completionMetric}
+              value={stats.completionRate}
+            />
+          </div>
 
           <section className="quick-add-panel" aria-labelledby="quick-add-title">
             <div className="panel-heading compact">
@@ -448,15 +633,15 @@ export function SmartTodoApp() {
                 <Plus size={18} />
               </span>
               <div>
-                <p className="eyebrow">Quick capture</p>
-                <h2 id="quick-add-title">Add one task</h2>
+                <p className="eyebrow">Captura rápida</p>
+                <h2 id="quick-add-title">Adicionar uma tarefa</h2>
               </div>
             </div>
 
             <form className="form-grid" onSubmit={handleCreateTask}>
               <div className="field-group">
                 <div className="label-row">
-                  <label htmlFor="manual-title">Task title</label>
+                  <label htmlFor="manual-title">Título da tarefa</label>
                   <span>{manualTitle.length}/{TASK_MAX_LENGTH}</span>
                 </div>
                 <Tooltip
@@ -469,7 +654,7 @@ export function SmartTodoApp() {
                       id="manual-title"
                       maxLength={TASK_MAX_LENGTH}
                       onChange={(event) => setManualTitle(event.target.value)}
-                      placeholder="Book flights"
+                      placeholder="Reservar voos"
                       type="text"
                       value={manualTitle}
                     />
@@ -489,51 +674,18 @@ export function SmartTodoApp() {
                     ) : (
                       <Plus size={18} aria-hidden="true" />
                     )}
-                    {isCreating ? 'Adding task...' : 'Add task'}
+                    {isCreating ? 'Adicionando tarefa...' : 'Adicionar tarefa'}
                   </button>
                 )}
               </Tooltip>
             </form>
           </section>
-        </aside>
-
-        <section className="task-area" aria-label="Tasks">
-          <div className="metrics-grid" aria-label="Task summary">
-            <MetricCard
-              icon={<LayoutList size={18} aria-hidden="true" />}
-              label="Total"
-              tooltip={tooltipCopy.totalMetric}
-              value={stats.total}
-            />
-            <MetricCard
-              icon={<Circle size={18} aria-hidden="true" />}
-              label="Pending"
-              tone="warning"
-              tooltip={tooltipCopy.pendingMetric}
-              value={stats.pending}
-            />
-            <MetricCard
-              icon={<CheckCircle2 size={18} aria-hidden="true" />}
-              label="Done"
-              tone="success"
-              tooltip={tooltipCopy.doneMetric}
-              value={stats.completed}
-            />
-            <MetricCard
-              icon={<BarChart3 size={18} aria-hidden="true" />}
-              label="Completion"
-              suffix="%"
-              tone="accent"
-              tooltip={tooltipCopy.completionMetric}
-              value={stats.completionRate}
-            />
-          </div>
 
           <div className="list-panel">
             <div className="task-toolbar">
               <div>
-                <p className="eyebrow">Current list</p>
-                <h2>Execution queue</h2>
+                <p className="eyebrow">Lista atual</p>
+                <h2>Fila de execução</h2>
               </div>
 
               <div className="toolbar-actions">
@@ -555,7 +707,9 @@ export function SmartTodoApp() {
                       }
                       tabIndex={0}
                     >
-                      {isRealtimeConnected ? 'Live sync' : 'Sync offline'}
+                      {isRealtimeConnected
+                        ? 'Sincronização ativa'
+                        : 'Sincronização offline'}
                     </span>
                   )}
                 </Tooltip>
@@ -576,14 +730,14 @@ export function SmartTodoApp() {
                         size={19}
                         aria-hidden="true"
                       />
-                      <span className="sr-only">Refresh tasks</span>
+                      <span className="sr-only">Recarregar tarefas</span>
                     </button>
                   )}
                 </Tooltip>
               </div>
             </div>
 
-            <div className="filter-tabs" aria-label="Filter tasks">
+            <div className="filter-tabs" aria-label="Filtrar tarefas">
               {filters.map((filter) => (
                 <Tooltip
                   className="tooltip-fill"
@@ -611,8 +765,6 @@ export function SmartTodoApp() {
               ))}
             </div>
 
-            {feedback ? <FeedbackBanner feedback={feedback} /> : null}
-
             {error ? (
               <div className="feedback error" role="alert">
                 <AlertCircle size={18} aria-hidden="true" />
@@ -629,20 +781,20 @@ export function SmartTodoApp() {
                       type="button"
                     >
                       <RefreshCw size={15} aria-hidden="true" />
-                      Retry
+                      Tentar novamente
                     </button>
                   )}
                 </Tooltip>
               </div>
             ) : null}
 
-            <div className="list-state" aria-busy={isLoading}>
+            <div className="list-state" aria-busy={isLoading || isReordering}>
               {isLoading ? <TaskSkeleton /> : null}
 
               {!isLoading && !error && tasks.length === 0 ? (
                 <EmptyState
-                  description="Generate a plan from a goal or capture the first manual task."
-                  title="Your queue is ready"
+                  description="Gere um plano a partir de um objetivo ou capture a primeira tarefa manual."
+                  title="Sua fila está pronta"
                 />
               ) : null}
 
@@ -652,154 +804,463 @@ export function SmartTodoApp() {
               filteredTasks.length === 0 ? (
                 <EmptyState
                   actionIcon={<LayoutList size={18} aria-hidden="true" />}
-                  actionLabel="Show all tasks"
+                  actionLabel="Mostrar todas as tarefas"
                   actionTooltip={tooltipCopy.showAll}
-                  description="There are no tasks in this view yet."
+                  description="Ainda não há tarefas nesta visualização."
                   onAction={() => setActiveFilter('all')}
-                  title={`No ${activeFilter} tasks`}
+                  title={emptyFilterTitles[activeFilter]}
                 />
               ) : null}
 
               {!isLoading && filteredTasks.length > 0 ? (
-                <ul className="task-list">
-                  {filteredTasks.map((task) => {
-                    const isPending = pendingIds.has(task.id);
-                    const isConfirmingDelete = confirmingDeleteId === task.id;
-
-                    return (
-                      <li
-                        className={task.isCompleted ? 'task-card done' : 'task-card'}
-                        key={task.id}
-                      >
-                        <Tooltip
-                          className="tooltip-control"
-                          content={
-                            task.isCompleted
-                              ? tooltipCopy.markPending
-                              : tooltipCopy.markDone
-                          }
-                        >
-                          {(tooltipId) => (
-                            <button
-                              aria-describedby={tooltipId}
-                              className="toggle-button"
-                              disabled={isPending}
-                              onClick={() => void handleToggleTask(task)}
-                              type="button"
-                            >
-                              {task.isCompleted ? (
-                                <CheckCircle2 size={23} aria-hidden="true" />
-                              ) : (
-                                <Circle size={23} aria-hidden="true" />
-                              )}
-                              <span className="sr-only">
-                                {task.isCompleted
-                                  ? 'Mark pending'
-                                  : 'Mark done'}
-                              </span>
-                            </button>
-                          )}
-                        </Tooltip>
-
-                        <div className="task-content">
-                          <p>{task.title}</p>
-                          <div className="task-meta">
-                            <span
-                              className={
-                                task.isAiGenerated ? 'badge ai' : 'badge'
-                              }
-                            >
-                              {task.isAiGenerated ? 'AI generated' : 'Manual'}
-                            </span>
-                            <span>
-                              <Clock3 size={14} aria-hidden="true" />
-                              {formatDate(task.createdAt)}
-                            </span>
-                          </div>
-                        </div>
-
-                        {isConfirmingDelete ? (
-                          <div className="confirm-actions">
-                            <Tooltip
-                              className="tooltip-control"
-                              content={tooltipCopy.confirmDelete}
-                            >
-                              {(tooltipId) => (
-                                <button
-                                  aria-describedby={tooltipId}
-                                  className="mini-button danger"
-                                  disabled={isPending}
-                                  onClick={() => void handleDeleteTask(task)}
-                                  type="button"
-                                >
-                                  {isPending ? (
-                                    <Loader2
-                                      className="spin"
-                                      size={16}
-                                      aria-hidden="true"
-                                    />
-                                  ) : (
-                                    <Trash2 size={16} aria-hidden="true" />
-                                  )}
-                                  Delete
-                                </button>
-                              )}
-                            </Tooltip>
-                            <Tooltip
-                              className="tooltip-control tooltip-end"
-                              content={tooltipCopy.cancelDelete}
-                            >
-                              {(tooltipId) => (
-                                <button
-                                  aria-describedby={tooltipId}
-                                  className="icon-button neutral small"
-                                  disabled={isPending}
-                                  onClick={() => setConfirmingDeleteId(null)}
-                                  type="button"
-                                >
-                                  <X size={17} aria-hidden="true" />
-                                  <span className="sr-only">Cancel delete</span>
-                                </button>
-                              )}
-                            </Tooltip>
-                          </div>
-                        ) : (
-                          <Tooltip
-                            className="tooltip-control tooltip-end"
-                            content={tooltipCopy.deleteTask}
-                          >
-                            {(tooltipId) => (
-                              <button
-                                aria-describedby={tooltipId}
-                                className="icon-button danger"
-                                disabled={isPending}
-                                onClick={() => handleStartDelete(task.id)}
-                                type="button"
-                              >
-                                {isPending ? (
-                                  <Loader2
-                                    className="spin"
-                                    size={19}
-                                    aria-hidden="true"
-                                  />
-                                ) : (
-                                  <Trash2 size={19} aria-hidden="true" />
-                                )}
-                                <span className="sr-only">Delete task</span>
-                              </button>
-                            )}
-                          </Tooltip>
-                        )}
-                      </li>
-                    );
-                  })}
-                </ul>
+                <DndContext
+                  collisionDetection={closestCenter}
+                  onDragEnd={(event) => void handleDragEnd(event)}
+                  sensors={sensors}
+                >
+                  <SortableContext
+                    items={filteredTaskIds}
+                    strategy={verticalListSortingStrategy}
+                  >
+                    <ul
+                      aria-label="Fila de execução reordenável"
+                      className={
+                        isReordering ? 'task-list reordering' : 'task-list'
+                      }
+                    >
+                      {filteredTasks.map((task) => (
+                        <SortableTaskCard
+                          isConfirmingDelete={confirmingDeleteId === task.id}
+                          isDisabled={isReordering}
+                          isPending={pendingIds.has(task.id)}
+                          key={task.id}
+                          onCancelDelete={() => setConfirmingDeleteId(null)}
+                          onDelete={handleDeleteTask}
+                          onOpenDetails={handleOpenTaskDetails}
+                          onStartDelete={handleStartDelete}
+                          onToggle={handleToggleTask}
+                          task={task}
+                        />
+                      ))}
+                    </ul>
+                  </SortableContext>
+                </DndContext>
               ) : null}
             </div>
           </div>
         </section>
       </div>
+
+      {editingTask ? (
+        <TaskDetailsModal
+          description={editDescription}
+          isSaving={isSavingTaskDetails}
+          label={editLabel}
+          onClose={handleCloseTaskDetails}
+          onDescriptionChange={setEditDescription}
+          onLabelChange={setEditLabel}
+          onSubmit={handleSaveTaskDetails}
+          task={editingTask}
+        />
+      ) : null}
+
+      <ToastViewport onDismiss={dismissToast} toasts={toasts} />
     </main>
+  );
+}
+
+function SortableTaskCard({
+  isConfirmingDelete,
+  isDisabled,
+  isPending,
+  onCancelDelete,
+  onDelete,
+  onOpenDetails,
+  onStartDelete,
+  onToggle,
+  task,
+}: {
+  isConfirmingDelete: boolean;
+  isDisabled: boolean;
+  isPending: boolean;
+  onCancelDelete: () => void;
+  onDelete: (task: Task) => void | Promise<void>;
+  onOpenDetails: (task: Task) => void;
+  onStartDelete: (taskId: string) => void;
+  onToggle: (task: Task) => void | Promise<void>;
+  task: Task;
+}) {
+  const {
+    attributes,
+    isDragging,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+  } = useSortable({
+    disabled: isDisabled || isPending,
+    id: task.id,
+  });
+  const description = task.description?.trim();
+  const label = task.label?.trim();
+  const style: CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+  };
+  const className = [
+    'task-card',
+    task.isCompleted ? 'done' : '',
+    isDragging ? 'dragging' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+  const {
+    'aria-describedby': sortableDescriptionId,
+    ...dragAttributes
+  } = attributes;
+
+  return (
+    <li className={className} ref={setNodeRef} style={style}>
+      <Tooltip className="tooltip-control" content={tooltipCopy.dragTask}>
+        {(tooltipId) => (
+          <button
+            aria-describedby={describedBy(tooltipId, sortableDescriptionId)}
+            aria-label={`Arrastar tarefa ${task.title}`}
+            className="drag-handle"
+            disabled={isDisabled || isPending}
+            type="button"
+            {...dragAttributes}
+            {...listeners}
+          >
+            <GripVertical size={19} aria-hidden="true" />
+          </button>
+        )}
+      </Tooltip>
+
+      <Tooltip
+        className="tooltip-control"
+        content={task.isCompleted ? tooltipCopy.markPending : tooltipCopy.markDone}
+      >
+        {(tooltipId) => (
+          <button
+            aria-describedby={tooltipId}
+            className="toggle-button"
+            disabled={isPending}
+            onClick={() => void onToggle(task)}
+            type="button"
+          >
+            {task.isCompleted ? (
+              <CheckCircle2 size={23} aria-hidden="true" />
+            ) : (
+              <Circle size={23} aria-hidden="true" />
+            )}
+            <span className="sr-only">
+              {task.isCompleted
+                ? 'Marcar como pendente'
+                : 'Marcar como concluída'}
+            </span>
+          </button>
+        )}
+      </Tooltip>
+
+      <Tooltip className="tooltip-fill" content={tooltipCopy.editTask}>
+        {(tooltipId) => (
+          <button
+            aria-describedby={tooltipId}
+            aria-label={`Editar detalhes de ${task.title}`}
+            className="task-content task-edit-button"
+            disabled={isPending}
+            onClick={() => onOpenDetails(task)}
+            type="button"
+          >
+            <span className="task-title">{task.title}</span>
+            <span
+              className={
+                description ? 'task-description' : 'task-description empty'
+              }
+            >
+              <FileText size={14} aria-hidden="true" />
+              <span>{description || 'Sem descrição'}</span>
+            </span>
+            <span className="task-meta">
+              <span className={task.isAiGenerated ? 'badge ai' : 'badge'}>
+                {task.isAiGenerated ? 'Gerada por IA' : 'Manual'}
+              </span>
+              <span className={label ? 'label-pill' : 'label-pill empty'}>
+                <Tag size={13} aria-hidden="true" />
+                {label || 'Sem etiqueta'}
+              </span>
+              <span>
+                <Clock3 size={14} aria-hidden="true" />
+                {formatDate(task.createdAt)}
+              </span>
+            </span>
+          </button>
+        )}
+      </Tooltip>
+
+      {isConfirmingDelete ? (
+        <div className="confirm-actions">
+          <Tooltip
+            className="tooltip-control"
+            content={tooltipCopy.confirmDelete}
+          >
+            {(tooltipId) => (
+              <button
+                aria-describedby={tooltipId}
+                className="mini-button danger"
+                disabled={isPending}
+                onClick={() => void onDelete(task)}
+                type="button"
+              >
+                {isPending ? (
+                  <Loader2 className="spin" size={16} aria-hidden="true" />
+                ) : (
+                  <Trash2 size={16} aria-hidden="true" />
+                )}
+                Excluir
+              </button>
+            )}
+          </Tooltip>
+          <Tooltip
+            className="tooltip-control tooltip-end"
+            content={tooltipCopy.cancelDelete}
+          >
+            {(tooltipId) => (
+              <button
+                aria-describedby={tooltipId}
+                className="icon-button neutral small"
+                disabled={isPending}
+                onClick={onCancelDelete}
+                type="button"
+              >
+                <X size={17} aria-hidden="true" />
+                <span className="sr-only">Cancelar exclusão</span>
+              </button>
+            )}
+          </Tooltip>
+        </div>
+      ) : (
+        <Tooltip
+          className="tooltip-control tooltip-end"
+          content={tooltipCopy.deleteTask}
+        >
+          {(tooltipId) => (
+            <button
+              aria-describedby={tooltipId}
+              className="icon-button danger"
+              disabled={isPending}
+              onClick={() => onStartDelete(task.id)}
+              type="button"
+            >
+              {isPending ? (
+                <Loader2 className="spin" size={19} aria-hidden="true" />
+              ) : (
+                <Trash2 size={19} aria-hidden="true" />
+              )}
+              <span className="sr-only">Excluir tarefa</span>
+            </button>
+          )}
+        </Tooltip>
+      )}
+    </li>
+  );
+}
+
+function TaskDetailsModal({
+  description,
+  isSaving,
+  label,
+  onClose,
+  onDescriptionChange,
+  onLabelChange,
+  onSubmit,
+  task,
+}: {
+  description: string;
+  isSaving: boolean;
+  label: string;
+  onClose: () => void;
+  onDescriptionChange: (value: string) => void;
+  onLabelChange: (value: string) => void;
+  onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  task: Task;
+}) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const labelId = useId();
+
+  useEffect(() => {
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        onClose();
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      window.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose();
+        }
+      }}
+    >
+      <form
+        aria-labelledby={titleId}
+        aria-modal="true"
+        className="task-modal"
+        onSubmit={onSubmit}
+        role="dialog"
+      >
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">Detalhes da tarefa</p>
+            <h2 id={titleId}>{task.title}</h2>
+          </div>
+          <Tooltip
+            className="tooltip-control tooltip-end"
+            content="Fechar detalhes da tarefa."
+          >
+            {(tooltipId) => (
+              <button
+                aria-describedby={tooltipId}
+                className="icon-button neutral"
+                disabled={isSaving}
+                onClick={onClose}
+                type="button"
+              >
+                <X size={18} aria-hidden="true" />
+                <span className="sr-only">Fechar detalhes</span>
+              </button>
+            )}
+          </Tooltip>
+        </div>
+
+        <div className="form-grid">
+          <div className="field-group">
+            <div className="label-row">
+              <label htmlFor={descriptionId}>Descrição</label>
+              <span>{description.length}/{TASK_DESCRIPTION_MAX_LENGTH}</span>
+            </div>
+            <textarea
+              id={descriptionId}
+              maxLength={TASK_DESCRIPTION_MAX_LENGTH}
+              onChange={(event) => onDescriptionChange(event.target.value)}
+              placeholder="Adicione contexto, critérios de pronto ou próximos passos."
+              rows={7}
+              value={description}
+            />
+          </div>
+
+          <div className="field-group">
+            <div className="label-row">
+              <label htmlFor={labelId}>Etiqueta</label>
+              <span>{label.length}/{TASK_LABEL_MAX_LENGTH}</span>
+            </div>
+            <input
+              id={labelId}
+              maxLength={TASK_LABEL_MAX_LENGTH}
+              onChange={(event) => onLabelChange(event.target.value)}
+              placeholder="Ex: Planejamento"
+              type="text"
+              value={label}
+            />
+          </div>
+        </div>
+
+        <div className="modal-actions">
+          <button
+            className="button tertiary"
+            disabled={isSaving}
+            onClick={onClose}
+            type="button"
+          >
+            Cancelar
+          </button>
+          <Tooltip
+            className="tooltip-control"
+            content={tooltipCopy.updateTaskDetails}
+          >
+            {(tooltipId) => (
+              <button
+                aria-describedby={tooltipId}
+                className="button primary"
+                disabled={isSaving}
+                type="submit"
+              >
+                {isSaving ? (
+                  <Loader2 className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <Save size={18} aria-hidden="true" />
+                )}
+                {isSaving ? 'Salvando...' : 'Salvar detalhes'}
+              </button>
+            )}
+          </Tooltip>
+        </div>
+      </form>
+    </div>
+  );
+}
+
+function ThemeControl({
+  onThemeChange,
+  theme,
+}: {
+  onThemeChange: (theme: Theme) => void;
+  theme: Theme;
+}) {
+  const options = [
+    {
+      icon: <Sun size={16} aria-hidden="true" />,
+      label: 'Light',
+      tooltip: tooltipCopy.themeLight,
+      value: 'light' as const,
+    },
+    {
+      icon: <Moon size={16} aria-hidden="true" />,
+      label: 'Dark',
+      tooltip: tooltipCopy.themeDark,
+      value: 'dark' as const,
+    },
+  ];
+
+  return (
+    <div className="theme-switcher" role="group" aria-label="Seleção de tema">
+      {options.map((option) => {
+        const isActive = theme === option.value;
+
+        return (
+          <Tooltip
+            className="tooltip-fill"
+            content={option.tooltip}
+            key={option.value}
+          >
+            {(tooltipId) => (
+              <button
+                aria-describedby={tooltipId}
+                aria-pressed={isActive}
+                className={isActive ? 'theme-option active' : 'theme-option'}
+                onClick={() => onThemeChange(option.value)}
+                suppressHydrationWarning
+                type="button"
+              >
+                {option.icon}
+                <span>{option.label}</span>
+              </button>
+            )}
+          </Tooltip>
+        );
+      })}
+    </div>
   );
 }
 
@@ -839,19 +1300,6 @@ function MetricCard({
         </div>
       )}
     </Tooltip>
-  );
-}
-
-function FeedbackBanner({ feedback }: { feedback: Feedback }) {
-  return (
-    <div className={`feedback ${feedback.type}`} role="status">
-      {feedback.type === 'success' ? (
-        <CheckCircle2 size={18} aria-hidden="true" />
-      ) : (
-        <AlertCircle size={18} aria-hidden="true" />
-      )}
-      <span>{feedback.message}</span>
-    </div>
   );
 }
 
@@ -922,7 +1370,7 @@ function Tooltip({
 
 function TaskSkeleton() {
   return (
-    <div className="skeleton-stack" aria-label="Loading tasks">
+    <div className="skeleton-stack" aria-label="Carregando tarefas">
       <div />
       <div />
       <div />

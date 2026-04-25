@@ -57,10 +57,10 @@ async function readErrorMessage(response: Response): Promise<string> {
       return payload.error;
     }
   } catch {
-    return 'Could not complete the request.';
+    return 'Não foi possível concluir a solicitação.';
   }
 
-  return 'Could not complete the request.';
+  return 'Não foi possível concluir a solicitação.';
 }
 
 export function fetchTasks(): Promise<Task[]> {
@@ -84,11 +84,23 @@ export function createTask(title: string): Promise<Task> {
 
 export function updateTask(
   id: string,
-  payload: { title?: string; isCompleted?: boolean },
+  payload: {
+    description?: string;
+    isCompleted?: boolean;
+    label?: string;
+    title?: string;
+  },
 ): Promise<Task> {
   return request<Task>(`/tasks/${encodeURIComponent(id)}`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
+  });
+}
+
+export function reorderTasks(orderedIds: string[]): Promise<Task[]> {
+  return request<Task[]>('/tasks/reorder', {
+    method: 'PATCH',
+    body: JSON.stringify({ orderedIds }),
   });
 }
 
@@ -98,13 +110,10 @@ export function deleteTask(id: string): Promise<void> {
   });
 }
 
-export async function generateTasks(
-  goal: string,
-  apiKey: string,
-): Promise<Task[]> {
+export async function generateTasks(goal: string): Promise<Task[]> {
   const response = await request<GenerateTasksResponse>('/tasks/ai-generate', {
     method: 'POST',
-    body: JSON.stringify({ goal, apiKey }),
+    body: JSON.stringify({ goal }),
   });
 
   return response.tasks;
