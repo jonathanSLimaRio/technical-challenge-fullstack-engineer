@@ -67,6 +67,14 @@ export function fetchTasks(): Promise<Task[]> {
   return request<Task[]>('/tasks');
 }
 
+export function getApiOrigin(): string {
+  try {
+    return new URL(API_URL).origin;
+  } catch {
+    return API_URL;
+  }
+}
+
 export function createTask(title: string): Promise<Task> {
   return request<Task>('/tasks', {
     method: 'POST',

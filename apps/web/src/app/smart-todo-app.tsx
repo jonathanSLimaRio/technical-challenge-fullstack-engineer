@@ -1,15 +1,23 @@
 'use client';
 
 import {
+  AlertCircle,
   CheckCircle2,
   Circle,
+  Clock3,
   KeyRound,
+  LayoutList,
   Loader2,
   Plus,
+  RefreshCw,
+  ShieldCheck,
   Sparkles,
   Trash2,
+  Wand2,
+  X,
 } from 'lucide-react';
-import { FormEvent, useMemo, useState } from 'react';
+import { FormEvent, useEffect, useMemo, useState } from 'react';
+import { io } from 'socket.io-client';
 import useSWR from 'swr';
 import {
   ApiError,
@@ -17,6 +25,7 @@ import {
   deleteTask,
   fetchTasks,
   generateTasks,
+  getApiOrigin,
   updateTask,
 } from '../lib/api';
 import type { Task } from '../types/task';
@@ -25,6 +34,11 @@ type Feedback = {
   type: 'error' | 'success';
   message: string;
 };
+
+type TaskFilter = 'all' | 'pending' | 'done' | 'ai';
+
+const GOAL_MAX_LENGTH = 500;
+const TASK_MAX_LENGTH = 160;
 
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat('en', {
@@ -43,6 +57,22 @@ function getErrorMessage(error: unknown): string {
   return 'Something went wrong. Please try again.';
 }
 
+function getFilteredTasks(tasks: Task[], filter: TaskFilter): Task[] {
+  if (filter === 'pending') {
+    return tasks.filter((task) => !task.isCompleted);
+  }
+
+  if (filter === 'done') {
+    return tasks.filter((task) => task.isCompleted);
+  }
+
+  if (filter === 'ai') {
+    return tasks.filter((task) => task.isAiGenerated);
+  }
+
+  return tasks;
+}
+
 export function SmartTodoApp() {
   const {
     data: tasks = [],
@@ -53,19 +83,62 @@ export function SmartTodoApp() {
   const [manualTitle, setManualTitle] = useState('');
   const [goal, setGoal] = useState('');
   const [apiKey, setApiKey] = useState('');
+  const [activeFilter, setActiveFilter] = useState<TaskFilter>('all');
   const [isCreating, setIsCreating] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
+  const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
+    null,
+  );
   const [feedback, setFeedback] = useState<Feedback | null>(null);
+  const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
 
   const stats = useMemo(() => {
     const completed = tasks.filter((task) => task.isCompleted).length;
+    const aiGenerated = tasks.filter((task) => task.isAiGenerated).length;
+    const pending = tasks.length - completed;
+
     return {
+      aiGenerated,
       completed,
+      completionRate:
+        tasks.length > 0 ? Math.round((completed / tasks.length) * 100) : 0,
+      pending,
       total: tasks.length,
-      pending: tasks.length - completed,
     };
   }, [tasks]);
+
+  const filteredTasks = useMemo(
+    () => getFilteredTasks(tasks, activeFilter),
+    [activeFilter, tasks],
+  );
+
+  const filters = useMemo(
+    () => [
+      { count: stats.total, label: 'All', value: 'all' as const },
+      { count: stats.pending, label: 'Pending', value: 'pending' as const },
+      { count: stats.completed, label: 'Done', value: 'done' as const },
+      { count: stats.aiGenerated, label: 'AI', value: 'ai' as const },
+    ],
+    [stats],
+  );
+
+  useEffect(() => {
+    const socket = io(getApiOrigin(), {
+      reconnectionAttempts: 5,
+      transports: ['websocket', 'polling'],
+    });
+
+    socket.on('connect', () => setIsRealtimeConnected(true));
+    socket.on('disconnect', () => setIsRealtimeConnected(false));
+    socket.on('tasks:changed', () => {
+      void mutate();
+    });
+
+    return () => {
+      socket.disconnect();
+    };
+  }, [mutate]);
 
   async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -82,6 +155,7 @@ export function SmartTodoApp() {
     try {
       const createdTask = await createTask(title);
       setManualTitle('');
+      setActiveFilter('all');
       await mutate((currentTasks = []) => [createdTask, ...currentTasks], {
         revalidate: false,
       });
@@ -109,6 +183,7 @@ export function SmartTodoApp() {
     try {
       const generatedTasks = await generateTasks(normalizedGoal, normalizedApiKey);
       setGoal('');
+      setActiveFilter('all');
       await mutate((currentTasks = []) => [...generatedTasks, ...currentTasks], {
         revalidate: false,
       });
@@ -168,6 +243,7 @@ export function SmartTodoApp() {
 
     try {
       await deleteTask(task.id);
+      setConfirmingDeleteId(null);
       setFeedback({ type: 'success', message: 'Task deleted.' });
     } catch (requestError) {
       await mutate(previousTasks, { revalidate: false });
@@ -175,6 +251,11 @@ export function SmartTodoApp() {
     } finally {
       setPending(task.id, false);
     }
+  }
+
+  function handleStartDelete(taskId: string) {
+    setConfirmingDeleteId(taskId);
+    setFeedback(null);
   }
 
   function setPending(id: string, isPending: boolean) {
@@ -194,195 +275,402 @@ export function SmartTodoApp() {
   return (
     <main className="app-shell">
       <header className="app-header">
-        <div>
-          <p className="eyebrow">AI task decomposition</p>
-          <h1>Smart To-Do List</h1>
-          <p className="subtitle">
-            Turn broad goals into focused tasks and keep the list moving.
-          </p>
+        <div className="brand-lockup">
+          <span className="logo-mark" aria-hidden="true">
+            <Sparkles size={20} />
+          </span>
+          <div>
+            <p className="eyebrow">AI task decomposition</p>
+            <h1>Smart To-Do List</h1>
+          </div>
         </div>
-        <div className="summary-strip" aria-label="Task summary">
-          <span>
-            <strong>{stats.total}</strong>
-            total
-          </span>
-          <span>
-            <strong>{stats.pending}</strong>
-            pending
-          </span>
-          <span>
-            <strong>{stats.completed}</strong>
-            done
-          </span>
-        </div>
+
+        <p className="header-copy">
+          Break large goals into clean next steps, then keep execution visible
+          from first draft to done.
+        </p>
       </header>
 
       <div className="workspace">
-        <aside className="control-stack" aria-label="Task controls">
-          <form className="surface" onSubmit={handleCreateTask}>
-            <div className="form-heading">
-              <Plus size={18} aria-hidden="true" />
-              <h2>Manual task</h2>
+        <aside className="control-rail" aria-label="Task controls">
+          <section className="planner-panel" aria-labelledby="planner-title">
+            <div className="panel-heading">
+              <span className="panel-icon" aria-hidden="true">
+                <Wand2 size={19} />
+              </span>
+              <div>
+                <p className="eyebrow">Primary workflow</p>
+                <h2 id="planner-title">Generate a focused plan</h2>
+              </div>
             </div>
-            <label htmlFor="manual-title">Title</label>
-            <input
-              id="manual-title"
-              maxLength={160}
-              onChange={(event) => setManualTitle(event.target.value)}
-              placeholder="Book flights"
-              type="text"
-              value={manualTitle}
-            />
-            <button
-              className="button primary"
-              disabled={isCreating || !manualTitle.trim()}
-              type="submit"
-            >
-              {isCreating ? (
-                <Loader2 className="spin" size={18} aria-hidden="true" />
-              ) : (
-                <Plus size={18} aria-hidden="true" />
-              )}
-              Add task
-            </button>
-          </form>
 
-          <form className="surface" onSubmit={handleGenerateTasks}>
-            <div className="form-heading">
-              <Sparkles size={18} aria-hidden="true" />
-              <h2>AI planner</h2>
+            <form className="form-grid" onSubmit={handleGenerateTasks}>
+              <div className="field-group">
+                <div className="label-row">
+                  <label htmlFor="goal">Goal</label>
+                  <span>{goal.length}/{GOAL_MAX_LENGTH}</span>
+                </div>
+                <textarea
+                  aria-describedby="goal-helper"
+                  id="goal"
+                  maxLength={GOAL_MAX_LENGTH}
+                  onChange={(event) => setGoal(event.target.value)}
+                  placeholder="Plan a five-day trip to Buenos Aires"
+                  rows={6}
+                  value={goal}
+                />
+                <p className="field-hint" id="goal-helper">
+                  Use one concrete outcome. The API will create the tasks and
+                  save them here.
+                </p>
+              </div>
+
+              <div className="field-group">
+                <label htmlFor="api-key">Provider API key</label>
+                <div className="key-field">
+                  <KeyRound size={17} aria-hidden="true" />
+                  <input
+                    aria-describedby="api-key-helper"
+                    autoComplete="new-password"
+                    id="api-key"
+                    onChange={(event) => setApiKey(event.target.value)}
+                    placeholder="sk-or-..."
+                    type="password"
+                    value={apiKey}
+                  />
+                </div>
+                <p className="field-hint secure" id="api-key-helper">
+                  <ShieldCheck size={15} aria-hidden="true" />
+                  Sent only with this request. It is not stored by the app.
+                </p>
+              </div>
+
+              <button
+                className="button primary wide"
+                disabled={isGenerating || !goal.trim() || !apiKey.trim()}
+                type="submit"
+              >
+                {isGenerating ? (
+                  <Loader2 className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <Sparkles size={18} aria-hidden="true" />
+                )}
+                {isGenerating ? 'Generating plan...' : 'Generate tasks'}
+              </button>
+            </form>
+          </section>
+
+          <section className="quick-add-panel" aria-labelledby="quick-add-title">
+            <div className="panel-heading compact">
+              <span className="panel-icon soft" aria-hidden="true">
+                <Plus size={18} />
+              </span>
+              <div>
+                <p className="eyebrow">Quick capture</p>
+                <h2 id="quick-add-title">Add one task</h2>
+              </div>
             </div>
-            <label htmlFor="goal">Goal</label>
-            <textarea
-              id="goal"
-              maxLength={500}
-              onChange={(event) => setGoal(event.target.value)}
-              placeholder="Plan a five-day trip to Buenos Aires"
-              rows={5}
-              value={goal}
-            />
-            <label htmlFor="api-key">Provider API key</label>
-            <div className="key-field">
-              <KeyRound size={17} aria-hidden="true" />
-              <input
-                id="api-key"
-                onChange={(event) => setApiKey(event.target.value)}
-                placeholder="sk-or-..."
-                type="password"
-                value={apiKey}
-              />
-            </div>
-            <button
-              className="button accent"
-              disabled={isGenerating || !goal.trim() || !apiKey.trim()}
-              type="submit"
-            >
-              {isGenerating ? (
-                <Loader2 className="spin" size={18} aria-hidden="true" />
-              ) : (
-                <Sparkles size={18} aria-hidden="true" />
-              )}
-              Generate tasks
-            </button>
-          </form>
+
+            <form className="form-grid" onSubmit={handleCreateTask}>
+              <div className="field-group">
+                <div className="label-row">
+                  <label htmlFor="manual-title">Task title</label>
+                  <span>{manualTitle.length}/{TASK_MAX_LENGTH}</span>
+                </div>
+                <input
+                  id="manual-title"
+                  maxLength={TASK_MAX_LENGTH}
+                  onChange={(event) => setManualTitle(event.target.value)}
+                  placeholder="Book flights"
+                  type="text"
+                  value={manualTitle}
+                />
+              </div>
+              <button
+                className="button secondary wide"
+                disabled={isCreating || !manualTitle.trim()}
+                type="submit"
+              >
+                {isCreating ? (
+                  <Loader2 className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <Plus size={18} aria-hidden="true" />
+                )}
+                {isCreating ? 'Adding task...' : 'Add task'}
+              </button>
+            </form>
+          </section>
         </aside>
 
         <section className="task-area" aria-label="Tasks">
-          <div className="task-toolbar">
-            <div>
-              <p className="eyebrow">Current list</p>
-              <h2>Tasks</h2>
-            </div>
-            <button
-              className="button ghost"
-              disabled={isLoading}
-              onClick={() => void mutate()}
-              type="button"
-            >
-              Refresh
-            </button>
+          <div className="metrics-grid" aria-label="Task summary">
+            <MetricCard label="Total" value={stats.total} />
+            <MetricCard label="Pending" tone="warning" value={stats.pending} />
+            <MetricCard label="Done" tone="success" value={stats.completed} />
+            <MetricCard
+              label="Completion"
+              suffix="%"
+              tone="accent"
+              value={stats.completionRate}
+            />
           </div>
 
-          {feedback ? (
-            <div className={`feedback ${feedback.type}`} role="status">
-              {feedback.message}
+          <div className="list-panel">
+            <div className="task-toolbar">
+              <div>
+                <p className="eyebrow">Current list</p>
+                <h2>Execution queue</h2>
+              </div>
+
+              <div className="toolbar-actions">
+                <span
+                  className={
+                    isRealtimeConnected ? 'sync-pill connected' : 'sync-pill'
+                  }
+                >
+                  {isRealtimeConnected ? 'Live sync' : 'Sync offline'}
+                </span>
+                <button
+                  className="icon-button neutral"
+                  disabled={isLoading}
+                  onClick={() => void mutate()}
+                  title="Refresh tasks"
+                  type="button"
+                >
+                  <RefreshCw
+                    className={isLoading ? 'spin' : undefined}
+                    size={19}
+                    aria-hidden="true"
+                  />
+                  <span className="sr-only">Refresh tasks</span>
+                </button>
+              </div>
             </div>
-          ) : null}
 
-          {error ? (
-            <div className="feedback error" role="alert">
-              {getErrorMessage(error)}
+            <div className="filter-tabs" aria-label="Filter tasks">
+              {filters.map((filter) => (
+                <button
+                  aria-pressed={activeFilter === filter.value}
+                  className={
+                    activeFilter === filter.value
+                      ? 'filter-tab active'
+                      : 'filter-tab'
+                  }
+                  key={filter.value}
+                  onClick={() => setActiveFilter(filter.value)}
+                  type="button"
+                >
+                  <span>{filter.label}</span>
+                  <strong>{filter.count}</strong>
+                </button>
+              ))}
             </div>
-          ) : null}
 
-          {isLoading ? <TaskSkeleton /> : null}
+            {feedback ? <FeedbackBanner feedback={feedback} /> : null}
 
-          {!isLoading && !error && tasks.length === 0 ? (
-            <div className="empty-state">
-              <Sparkles size={24} aria-hidden="true" />
-              <h3>No tasks yet</h3>
-              <p>Create a task or generate a plan from a goal.</p>
+            {error ? (
+              <div className="feedback error" role="alert">
+                <AlertCircle size={18} aria-hidden="true" />
+                <span>{getErrorMessage(error)}</span>
+                <button
+                  className="text-button"
+                  onClick={() => void mutate()}
+                  type="button"
+                >
+                  Retry
+                </button>
+              </div>
+            ) : null}
+
+            <div className="list-state" aria-busy={isLoading}>
+              {isLoading ? <TaskSkeleton /> : null}
+
+              {!isLoading && !error && tasks.length === 0 ? (
+                <EmptyState
+                  description="Generate a plan from a goal or capture the first manual task."
+                  title="Your queue is ready"
+                />
+              ) : null}
+
+              {!isLoading &&
+              !error &&
+              tasks.length > 0 &&
+              filteredTasks.length === 0 ? (
+                <EmptyState
+                  actionLabel="Show all tasks"
+                  description="There are no tasks in this view yet."
+                  onAction={() => setActiveFilter('all')}
+                  title={`No ${activeFilter} tasks`}
+                />
+              ) : null}
+
+              {!isLoading && filteredTasks.length > 0 ? (
+                <ul className="task-list">
+                  {filteredTasks.map((task) => {
+                    const isPending = pendingIds.has(task.id);
+                    const isConfirmingDelete = confirmingDeleteId === task.id;
+
+                    return (
+                      <li
+                        className={task.isCompleted ? 'task-card done' : 'task-card'}
+                        key={task.id}
+                      >
+                        <button
+                          className="toggle-button"
+                          disabled={isPending}
+                          onClick={() => void handleToggleTask(task)}
+                          title={
+                            task.isCompleted ? 'Mark pending' : 'Mark done'
+                          }
+                          type="button"
+                        >
+                          {task.isCompleted ? (
+                            <CheckCircle2 size={23} aria-hidden="true" />
+                          ) : (
+                            <Circle size={23} aria-hidden="true" />
+                          )}
+                          <span className="sr-only">
+                            {task.isCompleted ? 'Mark pending' : 'Mark done'}
+                          </span>
+                        </button>
+
+                        <div className="task-content">
+                          <p>{task.title}</p>
+                          <div className="task-meta">
+                            <span
+                              className={
+                                task.isAiGenerated ? 'badge ai' : 'badge'
+                              }
+                            >
+                              {task.isAiGenerated ? 'AI generated' : 'Manual'}
+                            </span>
+                            <span>
+                              <Clock3 size={14} aria-hidden="true" />
+                              {formatDate(task.createdAt)}
+                            </span>
+                          </div>
+                        </div>
+
+                        {isConfirmingDelete ? (
+                          <div className="confirm-actions">
+                            <button
+                              className="mini-button danger"
+                              disabled={isPending}
+                              onClick={() => void handleDeleteTask(task)}
+                              type="button"
+                            >
+                              {isPending ? (
+                                <Loader2
+                                  className="spin"
+                                  size={16}
+                                  aria-hidden="true"
+                                />
+                              ) : null}
+                              Delete
+                            </button>
+                            <button
+                              className="icon-button neutral small"
+                              disabled={isPending}
+                              onClick={() => setConfirmingDeleteId(null)}
+                              title="Cancel delete"
+                              type="button"
+                            >
+                              <X size={17} aria-hidden="true" />
+                              <span className="sr-only">Cancel delete</span>
+                            </button>
+                          </div>
+                        ) : (
+                          <button
+                            className="icon-button danger"
+                            disabled={isPending}
+                            onClick={() => handleStartDelete(task.id)}
+                            title="Delete task"
+                            type="button"
+                          >
+                            {isPending ? (
+                              <Loader2
+                                className="spin"
+                                size={19}
+                                aria-hidden="true"
+                              />
+                            ) : (
+                              <Trash2 size={19} aria-hidden="true" />
+                            )}
+                            <span className="sr-only">Delete task</span>
+                          </button>
+                        )}
+                      </li>
+                    );
+                  })}
+                </ul>
+              ) : null}
             </div>
-          ) : null}
-
-          {!isLoading && tasks.length > 0 ? (
-            <ul className="task-list">
-              {tasks.map((task) => {
-                const isPending = pendingIds.has(task.id);
-                return (
-                  <li
-                    className={task.isCompleted ? 'task done' : 'task'}
-                    key={task.id}
-                  >
-                    <button
-                      className="icon-button"
-                      disabled={isPending}
-                      onClick={() => void handleToggleTask(task)}
-                      title={task.isCompleted ? 'Mark pending' : 'Mark done'}
-                      type="button"
-                    >
-                      {task.isCompleted ? (
-                        <CheckCircle2 size={22} aria-hidden="true" />
-                      ) : (
-                        <Circle size={22} aria-hidden="true" />
-                      )}
-                      <span className="sr-only">
-                        {task.isCompleted ? 'Mark pending' : 'Mark done'}
-                      </span>
-                    </button>
-
-                    <div className="task-content">
-                      <p>{task.title}</p>
-                      <div className="task-meta">
-                        <span className={task.isAiGenerated ? 'badge ai' : 'badge'}>
-                          {task.isAiGenerated ? 'AI' : 'Manual'}
-                        </span>
-                        <span>{formatDate(task.createdAt)}</span>
-                      </div>
-                    </div>
-
-                    <button
-                      className="icon-button danger"
-                      disabled={isPending}
-                      onClick={() => void handleDeleteTask(task)}
-                      title="Delete task"
-                      type="button"
-                    >
-                      {isPending ? (
-                        <Loader2 className="spin" size={20} aria-hidden="true" />
-                      ) : (
-                        <Trash2 size={20} aria-hidden="true" />
-                      )}
-                      <span className="sr-only">Delete task</span>
-                    </button>
-                  </li>
-                );
-              })}
-            </ul>
-          ) : null}
+          </div>
         </section>
       </div>
     </main>
+  );
+}
+
+function MetricCard({
+  label,
+  suffix = '',
+  tone = 'default',
+  value,
+}: {
+  label: string;
+  suffix?: string;
+  tone?: 'accent' | 'default' | 'success' | 'warning';
+  value: number;
+}) {
+  return (
+    <div className={`metric-card ${tone}`}>
+      <span>{label}</span>
+      <strong>
+        {value}
+        {suffix}
+      </strong>
+    </div>
+  );
+}
+
+function FeedbackBanner({ feedback }: { feedback: Feedback }) {
+  return (
+    <div className={`feedback ${feedback.type}`} role="status">
+      {feedback.type === 'success' ? (
+        <CheckCircle2 size={18} aria-hidden="true" />
+      ) : (
+        <AlertCircle size={18} aria-hidden="true" />
+      )}
+      <span>{feedback.message}</span>
+    </div>
+  );
+}
+
+function EmptyState({
+  actionLabel,
+  description,
+  onAction,
+  title,
+}: {
+  actionLabel?: string;
+  description: string;
+  onAction?: () => void;
+  title: string;
+}) {
+  return (
+    <div className="empty-state">
+      <span className="empty-icon" aria-hidden="true">
+        <LayoutList size={24} />
+      </span>
+      <h3>{title}</h3>
+      <p>{description}</p>
+      {actionLabel && onAction ? (
+        <button className="button tertiary" onClick={onAction} type="button">
+          {actionLabel}
+        </button>
+      ) : null}
+    </div>
   );
 }
 
