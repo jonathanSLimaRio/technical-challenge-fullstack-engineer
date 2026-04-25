@@ -2,9 +2,14 @@ import { Injectable } from '@nestjs/common';
 import { WebSocketGateway, WebSocketServer } from '@nestjs/websockets';
 import type { Server } from 'socket.io';
 
-type TaskChangeAction = 'created' | 'deleted' | 'generated' | 'updated';
+type TaskChangeAction =
+  | 'created'
+  | 'deleted'
+  | 'generated'
+  | 'reordered'
+  | 'updated';
 
-export type TasksChangedPayload = {
+type TasksChangedPayload = {
   action: TaskChangeAction;
   at: string;
 };

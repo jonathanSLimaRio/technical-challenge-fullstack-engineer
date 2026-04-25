@@ -8,6 +8,15 @@ export class TaskResponseDto {
   @ApiProperty()
   title!: string;
 
+  @ApiProperty({ nullable: true })
+  description!: string | null;
+
+  @ApiProperty({ nullable: true })
+  label!: string | null;
+
+  @ApiProperty()
+  position!: number;
+
   @ApiProperty()
   isCompleted!: boolean;
 
@@ -24,6 +33,9 @@ export class TaskResponseDto {
     return {
       id: task.id,
       title: task.title,
+      description: task.description,
+      label: task.label,
+      position: task.position,
       isCompleted: task.isCompleted,
       isAiGenerated: task.isAiGenerated,
       createdAt: task.createdAt,

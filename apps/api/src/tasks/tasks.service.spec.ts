@@ -1,4 +1,4 @@
-import { NotFoundException } from '@nestjs/common';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { Repository } from 'typeorm';
 import { AiTaskGeneratorService } from '../ai/ai-task-generator.service';
 import { Task } from './task.entity';
@@ -43,6 +43,9 @@ function createHarness(): Harness {
     create: jest.fn((input: Partial<Task>) => ({
       id: '',
       title: '',
+      description: null,
+      label: null,
+      position: 0,
       isCompleted: false,
       isAiGenerated: false,
       createdAt: undefined,
@@ -61,6 +64,10 @@ function createHarness(): Harness {
     }),
     find: jest.fn(async () =>
       [...tasks].sort((left, right) => {
+        if (left.position !== right.position) {
+          return left.position - right.position;
+        }
+
         return right.createdAt.getTime() - left.createdAt.getTime();
       }),
     ),
@@ -72,7 +79,13 @@ function createHarness(): Harness {
         callback({ save: managerSave }),
       ),
     },
-    save: jest.fn(async (task: Task) => persistTask(task)),
+    save: jest.fn(async (taskOrTasks: Task | Task[]) => {
+      if (Array.isArray(taskOrTasks)) {
+        return taskOrTasks.map(persistTask);
+      }
+
+      return persistTask(taskOrTasks);
+    }),
   } as unknown as Repository<Task>;
 
   const aiTaskGenerator = {
@@ -102,6 +115,9 @@ describe(TasksService.name, () => {
     const task = await service.create({ title: '  Book    flights  ' });
 
     expect(task.title).toBe('Book flights');
+    expect(task.description).toBeNull();
+    expect(task.label).toBeNull();
+    expect(task.position).toBe(0);
     expect(task.isCompleted).toBe(false);
     expect(task.isAiGenerated).toBe(false);
     expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('created');
@@ -116,19 +132,63 @@ describe(TasksService.name, () => {
     await expect(service.findAll()).resolves.toEqual([second, first]);
   });
 
-  it('updates title and completion status', async () => {
+  it('updates title, metadata and completion status', async () => {
     const { service, tasksEventsGateway } = createHarness();
     const task = await service.create({ title: 'Pack bags' });
     tasksEventsGateway.emitTasksChanged.mockClear();
 
     const updated = await service.update(task.id, {
+      description: '  Confirm airline baggage policy  ',
       isCompleted: true,
+      label: '  Travel   admin ',
       title: '  Pack carry-on bag ',
     });
 
     expect(updated.title).toBe('Pack carry-on bag');
+    expect(updated.description).toBe('Confirm airline baggage policy');
+    expect(updated.label).toBe('Travel admin');
     expect(updated.isCompleted).toBe(true);
     expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('updated');
+  });
+
+  it('persists reordered tasks', async () => {
+    const { service, tasksEventsGateway } = createHarness();
+
+    const first = await service.create({ title: 'First task' });
+    const second = await service.create({ title: 'Second task' });
+    const third = await service.create({ title: 'Third task' });
+    tasksEventsGateway.emitTasksChanged.mockClear();
+
+    const reordered = await service.reorder([first.id, third.id, second.id]);
+
+    expect(reordered.map((task) => task.id)).toEqual([
+      first.id,
+      third.id,
+      second.id,
+    ]);
+    expect(reordered.map((task) => task.position)).toEqual([0, 1, 2]);
+    expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith(
+      'reordered',
+    );
+  });
+
+  it('rejects invalid reorder payloads', async () => {
+    const { service } = createHarness();
+
+    const first = await service.create({ title: 'First task' });
+    const second = await service.create({ title: 'Second task' });
+
+    await expect(service.reorder([first.id, first.id])).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    await expect(service.reorder([first.id])).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    await expect(service.reorder([first.id, 'missing-task'])).rejects.toBeInstanceOf(
+      BadRequestException,
+    );
+    await expect(service.findAll()).resolves.toHaveLength(2);
+    expect(second.id).toBeDefined();
   });
 
   it('deletes a task', async () => {
@@ -152,7 +212,6 @@ describe(TasksService.name, () => {
     ]);
 
     const generatedTasks = await service.generateFromGoal({
-      apiKey: 'sk-test',
       goal: 'Plan a trip',
     });
 
@@ -168,7 +227,7 @@ describe(TasksService.name, () => {
     aiTaskGenerator.generateTasks.mockRejectedValue(new Error('provider failed'));
 
     await expect(
-      service.generateFromGoal({ apiKey: 'sk-test', goal: 'Plan a trip' }),
+      service.generateFromGoal({ goal: 'Plan a trip' }),
     ).rejects.toThrow('provider failed');
 
     expect(tasks).toHaveLength(0);

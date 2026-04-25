@@ -12,7 +12,6 @@ import {
 const MAX_GENERATED_TASKS = 10;
 
 type GenerateTasksInput = {
-  apiKey: string;
   goal: string;
 };
 
@@ -41,7 +40,6 @@ export class AiTaskGeneratorService {
 
     const messages = this.buildMessages(input.goal);
     const rawContent = await this.client.createJsonCompletion({
-      apiKey: input.apiKey,
       messages,
     });
 
@@ -50,7 +48,7 @@ export class AiTaskGeneratorService {
 
     if (titles.length === 0) {
       throw new UnprocessableEntityException(
-        'The AI response did not include actionable tasks.',
+        'A resposta da IA não incluiu tarefas acionáveis.',
       );
     }
 
@@ -64,11 +62,11 @@ export class AiTaskGeneratorService {
       {
         role: 'system',
         content:
-          'You are a precise planning assistant. Break a user goal into concrete, actionable to-do items. Return only valid JSON with the shape {"tasks":[{"title":"..."}]}. Use 4 to 8 tasks. Keep each title under 120 characters. Do not include markdown.',
+          'Você é um assistente de planejamento preciso. Divida o objetivo do usuário em tarefas concretas e acionáveis. Retorne apenas JSON válido no formato {"tasks":[{"title":"..."}]}. Use de 4 a 8 tarefas. Mantenha cada título com menos de 120 caracteres. Não inclua markdown.',
       },
       {
         role: 'user',
-        content: `Goal: ${normalizedGoal}`,
+        content: `Objetivo: ${normalizedGoal}`,
       },
     ];
   }
@@ -88,7 +86,7 @@ export class AiTaskGeneratorService {
       if (!jsonMatch) {
         this.logInvalidResponse('invalid_json');
         throw new BadGatewayException(
-          'The AI provider returned invalid JSON. Please try again.',
+          'O provedor de IA retornou JSON inválido. Tente novamente.',
         );
       }
 
@@ -97,7 +95,7 @@ export class AiTaskGeneratorService {
       } catch {
         this.logInvalidResponse('invalid_json');
         throw new BadGatewayException(
-          'The AI provider returned invalid JSON. Please try again.',
+          'O provedor de IA retornou JSON inválido. Tente novamente.',
         );
       }
     }
@@ -107,7 +105,7 @@ export class AiTaskGeneratorService {
     if (!Array.isArray(payload.tasks)) {
       this.logInvalidResponse('missing_tasks_array');
       throw new BadGatewayException(
-        'The AI provider returned JSON without a tasks array.',
+        'O provedor de IA retornou JSON sem um array de tarefas.',
       );
     }
 
@@ -138,14 +136,15 @@ export class AiTaskGeneratorService {
   }
 
   private generateMockTasks(goal: string): string[] {
-    const subject = goal.trim().replace(/\s+/g, ' ').slice(0, 80) || 'the goal';
+    const subject =
+      goal.trim().replace(/\s+/g, ' ').slice(0, 80) || 'o objetivo';
     return [
-      `Clarify the desired outcome for ${subject}`,
-      'List the smallest actionable next steps',
-      'Identify dependencies, blockers and required inputs',
-      'Prioritize the tasks by impact and urgency',
-      'Schedule the first focused execution block',
-      'Review progress and adjust the plan',
+      `Esclarecer o resultado desejado para ${subject}`,
+      'Listar os menores próximos passos acionáveis',
+      'Identificar dependências, bloqueios e entradas necessárias',
+      'Priorizar as tarefas por impacto e urgência',
+      'Agendar o primeiro bloco de execução focada',
+      'Revisar o progresso e ajustar o plano',
     ];
   }
 

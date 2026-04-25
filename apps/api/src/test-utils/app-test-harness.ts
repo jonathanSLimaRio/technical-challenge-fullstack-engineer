@@ -18,6 +18,7 @@ const managedEnvKeys = [
   'AI_THROTTLE_TTL_MS',
   'CORS_ORIGIN',
   'ENABLE_SWAGGER',
+  'LLM_API_KEY',
   'LLM_PROVIDER',
   'NODE_ENV',
   'SQLITE_PATH',

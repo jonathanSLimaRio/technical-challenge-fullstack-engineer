@@ -16,12 +16,14 @@ import {
   ApiNoContentResponse,
   ApiOkResponse,
   ApiOperation,
+  ApiServiceUnavailableResponse,
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { GenerateTasksDto } from './dto/generate-tasks.dto';
+import { ReorderTasksDto } from './dto/reorder-tasks.dto';
 import {
   GenerateTasksResponseDto,
   TaskResponseDto,
@@ -40,7 +42,7 @@ export class TasksController {
   constructor(private readonly tasksService: TasksService) {}
 
   @Get()
-  @ApiOperation({ summary: 'List tasks ordered by creation date' })
+  @ApiOperation({ summary: 'Lista tarefas ordenadas por data de criação' })
   @ApiOkResponse({ type: [TaskResponseDto] })
   async findAll(): Promise<TaskResponseDto[]> {
     const tasks = await this.tasksService.findAll();
@@ -48,15 +50,25 @@ export class TasksController {
   }
 
   @Post()
-  @ApiOperation({ summary: 'Create a manual task' })
+  @ApiOperation({ summary: 'Cria uma tarefa manual' })
   @ApiCreatedResponse({ type: TaskResponseDto })
   async create(@Body() dto: CreateTaskDto): Promise<TaskResponseDto> {
     const task = await this.tasksService.create(dto);
     return TaskResponseDto.fromEntity(task);
   }
 
+  @Patch('reorder')
+  @ApiOperation({ summary: 'Reordena a fila de execucao das tarefas' })
+  @ApiOkResponse({ type: [TaskResponseDto] })
+  async reorder(@Body() dto: ReorderTasksDto): Promise<TaskResponseDto[]> {
+    const tasks = await this.tasksService.reorder(dto.orderedIds);
+    return tasks.map(TaskResponseDto.fromEntity);
+  }
+
   @Patch(':id')
-  @ApiOperation({ summary: 'Update task title or completion status' })
+  @ApiOperation({
+    summary: 'Atualiza o título da tarefa ou o status de conclusão',
+  })
   @ApiOkResponse({ type: TaskResponseDto })
   async update(
     @Param('id', ParseUUIDPipe) id: string,
@@ -68,7 +80,7 @@ export class TasksController {
 
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
-  @ApiOperation({ summary: 'Delete a task' })
+  @ApiOperation({ summary: 'Exclui uma tarefa' })
   @ApiNoContentResponse()
   async remove(@Param('id', ParseUUIDPipe) id: string): Promise<void> {
     await this.tasksService.remove(id);
@@ -81,10 +93,17 @@ export class TasksController {
       ttl: envNumber('AI_THROTTLE_TTL_MS', 60000),
     },
   })
-  @ApiOperation({ summary: 'Generate tasks from a high-level goal' })
+  @ApiOperation({ summary: 'Gera tarefas a partir de um objetivo amplo' })
   @ApiCreatedResponse({ type: GenerateTasksResponseDto })
-  @ApiUnauthorizedResponse({ description: 'Invalid or unauthorized provider key' })
-  @ApiBadGatewayResponse({ description: 'Provider timeout or invalid AI response' })
+  @ApiUnauthorizedResponse({
+    description: 'Chave do provedor inválida ou não autorizada',
+  })
+  @ApiBadGatewayResponse({
+    description: 'Timeout do provedor ou resposta inválida da IA',
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'Chave da API de IA nao configurada no servidor',
+  })
   async generateFromGoal(
     @Body() dto: GenerateTasksDto,
   ): Promise<GenerateTasksResponseDto> {

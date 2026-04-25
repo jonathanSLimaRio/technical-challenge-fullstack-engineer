@@ -14,6 +14,15 @@ export class Task {
   @Column({ type: 'varchar', length: 160 })
   title!: string;
 
+  @Column({ type: 'text', nullable: true })
+  description!: string | null;
+
+  @Column({ type: 'varchar', length: 40, nullable: true })
+  label!: string | null;
+
+  @Column({ type: 'integer', default: 0 })
+  position!: number;
+
   @Column({ name: 'is_completed', type: 'boolean', default: false })
   isCompleted!: boolean;
 

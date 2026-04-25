@@ -14,7 +14,7 @@ export class HealthController {
   constructor(private readonly dataSource: DataSource) {}
 
   @Get()
-  @ApiOperation({ summary: 'Return API and database health' })
+  @ApiOperation({ summary: 'Retorna a saúde da API e do banco de dados' })
   @ApiOkResponse({
     schema: {
       example: {
@@ -28,7 +28,9 @@ export class HealthController {
     try {
       await this.dataSource.query('SELECT 1');
     } catch {
-      throw new ServiceUnavailableException('Database health check failed.');
+      throw new ServiceUnavailableException(
+        'A verificação de saúde do banco de dados falhou.',
+      );
     }
 
     return {

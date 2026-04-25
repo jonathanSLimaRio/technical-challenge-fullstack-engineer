@@ -2,18 +2,21 @@ import {
   BadGatewayException,
   GatewayTimeoutException,
   HttpStatus,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 import { OpenAiCompatibleClient } from './openai-compatible.client';
 
 describe(OpenAiCompatibleClient.name, () => {
   const originalFetch = global.fetch;
+  const originalApiKey = process.env.LLM_API_KEY;
   const originalBaseUrl = process.env.LLM_BASE_URL;
   const originalModel = process.env.LLM_MODEL;
   const originalTimeout = process.env.LLM_TIMEOUT_MS;
   let client: OpenAiCompatibleClient;
 
   beforeEach(() => {
+    process.env.LLM_API_KEY = 'sk-server-test';
     process.env.LLM_BASE_URL = 'https://provider.test/v1';
     process.env.LLM_MODEL = 'test-model';
     process.env.LLM_TIMEOUT_MS = '1000';
@@ -23,9 +26,10 @@ describe(OpenAiCompatibleClient.name, () => {
 
   afterEach(() => {
     global.fetch = originalFetch;
-    process.env.LLM_BASE_URL = originalBaseUrl;
-    process.env.LLM_MODEL = originalModel;
-    process.env.LLM_TIMEOUT_MS = originalTimeout;
+    restoreEnv('LLM_API_KEY', originalApiKey);
+    restoreEnv('LLM_BASE_URL', originalBaseUrl);
+    restoreEnv('LLM_MODEL', originalModel);
+    restoreEnv('LLM_TIMEOUT_MS', originalTimeout);
     jest.restoreAllMocks();
   });
 
@@ -42,7 +46,6 @@ describe(OpenAiCompatibleClient.name, () => {
 
     await expect(
       client.createJsonCompletion({
-        apiKey: 'sk-test',
         messages: [{ role: 'user', content: 'Goal: Plan a trip' }],
       }),
     ).resolves.toBe('{"tasks":[]}');
@@ -52,7 +55,7 @@ describe(OpenAiCompatibleClient.name, () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
-          Authorization: 'Bearer sk-test',
+          Authorization: 'Bearer sk-server-test',
           'Content-Type': 'application/json',
         }),
         body: expect.stringContaining('"model":"test-model"'),
@@ -70,7 +73,6 @@ describe(OpenAiCompatibleClient.name, () => {
 
     await expect(
       client.createJsonCompletion({
-        apiKey: 'sk-bad',
         messages: [{ role: 'user', content: 'Goal: Plan a trip' }],
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
@@ -87,7 +89,6 @@ describe(OpenAiCompatibleClient.name, () => {
 
     await expect(
       client.createJsonCompletion({
-        apiKey: 'sk-test',
         messages: [{ role: 'user', content: 'Goal: Plan a trip' }],
       }),
     ).rejects.toMatchObject({
@@ -104,7 +105,6 @@ describe(OpenAiCompatibleClient.name, () => {
 
     await expect(
       client.createJsonCompletion({
-        apiKey: 'sk-test',
         messages: [{ role: 'user', content: 'Goal: Plan a trip' }],
       }),
     ).rejects.toBeInstanceOf(GatewayTimeoutException);
@@ -130,7 +130,6 @@ describe(OpenAiCompatibleClient.name, () => {
 
     await expect(
       client.createJsonCompletion({
-        apiKey: 'sk-test',
         messages: [{ role: 'user', content: 'Goal: test' }],
       }),
     ).resolves.toBe('{"tasks":[]}');
@@ -146,10 +145,9 @@ describe(OpenAiCompatibleClient.name, () => {
 
     await expect(
       client.createJsonCompletion({
-        apiKey: 'sk-test',
         messages: [{ role: 'user', content: 'Goal: test' }],
       }),
-    ).rejects.toThrow('empty response');
+    ).rejects.toThrow('resposta vazia');
 
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
@@ -164,10 +162,28 @@ describe(OpenAiCompatibleClient.name, () => {
 
     await expect(
       client.createJsonCompletion({
-        apiKey: 'sk-test',
         messages: [{ role: 'user', content: 'Goal: Plan a trip' }],
       }),
     ).rejects.toBeInstanceOf(BadGatewayException);
     expect(fetchMock).toHaveBeenCalledTimes(1);
   });
+
+  it('rejects real provider usage when the server API key is missing', async () => {
+    delete process.env.LLM_API_KEY;
+
+    await expect(
+      client.createJsonCompletion({
+        messages: [{ role: 'user', content: 'Goal: Plan a trip' }],
+      }),
+    ).rejects.toBeInstanceOf(ServiceUnavailableException);
+    expect(global.fetch).not.toHaveBeenCalled();
+  });
 });
+
+function restoreEnv(name: string, value: string | undefined): void {
+  if (value === undefined) {
+    delete process.env[name];
+  } else {
+    process.env[name] = value;
+  }
+}

@@ -5,6 +5,7 @@ import {
   HttpStatus,
   Injectable,
   Logger,
+  ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
 
@@ -14,7 +15,6 @@ export type ChatMessage = {
 };
 
 type CompletionInput = {
-  apiKey: string;
   messages: ChatMessage[];
 };
 
@@ -41,11 +41,12 @@ export class OpenAiCompatibleClient {
 
   async createJsonCompletion(input: CompletionInput): Promise<string> {
     const maxAttempts = 2;
+    const apiKey = this.providerApiKey();
     let lastError: HttpException | undefined;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
       try {
-        return await this.createJsonCompletionOnce(input);
+        return await this.createJsonCompletionOnce(input, apiKey);
       } catch (error) {
         const exception = this.toHttpException(error);
         lastError = exception;
@@ -66,13 +67,14 @@ export class OpenAiCompatibleClient {
     throw (
       lastError ??
       new BadGatewayException(
-        'Could not reach the AI provider. Please try again.',
+        'Não foi possível acessar o provedor de IA. Tente novamente.',
       )
     );
   }
 
   private async createJsonCompletionOnce(
     input: CompletionInput,
+    apiKey: string,
   ): Promise<string> {
     const timeoutMs = Number(process.env.LLM_TIMEOUT_MS ?? 20000);
     const controller = new AbortController();
@@ -82,7 +84,7 @@ export class OpenAiCompatibleClient {
       const response = await fetch(this.completionsUrl(), {
         method: 'POST',
         headers: {
-          Authorization: `Bearer ${input.apiKey}`,
+          Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
           'HTTP-Referer': 'http://localhost:3000',
           'X-Title': 'Smart To-Do List Technical Challenge',
@@ -105,7 +107,7 @@ export class OpenAiCompatibleClient {
 
       if (typeof content !== 'string' || !content.trim()) {
         throw new BadGatewayException(
-          'The AI provider returned an empty response.',
+          'O provedor de IA retornou uma resposta vazia.',
         );
       }
 
@@ -116,8 +118,20 @@ export class OpenAiCompatibleClient {
   }
 
   private completionsUrl(): string {
-    const baseUrl = process.env.LLM_BASE_URL ?? 'https://openrouter.ai/api/v1';
+    const baseUrl = process.env.LLM_BASE_URL ?? 'https://api.openai.com/v1';
     return `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
+  }
+
+  private providerApiKey(): string {
+    const apiKey = process.env.LLM_API_KEY?.trim();
+
+    if (!apiKey) {
+      throw new ServiceUnavailableException(
+        'A chave da API de IA nao foi configurada no servidor.',
+      );
+    }
+
+    return apiKey;
   }
 
   private async providerError(response: Response): Promise<HttpException> {
@@ -125,26 +139,26 @@ export class OpenAiCompatibleClient {
 
     if (response.status === HttpStatus.UNAUTHORIZED || response.status === 403) {
       return new UnauthorizedException(
-        message ?? 'The AI provider rejected the API key.',
+        message ?? 'O provedor de IA rejeitou a chave da API.',
       );
     }
 
     if (response.status === HttpStatus.TOO_MANY_REQUESTS) {
       return new HttpException(
-        message ?? 'The AI provider rate limit was exceeded.',
+        message ?? 'O limite de taxa do provedor de IA foi excedido.',
         HttpStatus.TOO_MANY_REQUESTS,
       );
     }
 
     if (TRANSIENT_PROVIDER_STATUSES.has(response.status)) {
       return new HttpException(
-        message ?? `The AI provider returned HTTP ${response.status}.`,
+        message ?? `O provedor de IA retornou HTTP ${response.status}.`,
         response.status,
       );
     }
 
     return new BadGatewayException(
-      message ?? `The AI provider returned HTTP ${response.status}.`,
+      message ?? `O provedor de IA retornou HTTP ${response.status}.`,
     );
   }
 
@@ -175,7 +189,7 @@ export class OpenAiCompatibleClient {
   private toHttpException(error: unknown): HttpException {
     if (this.isAbortError(error)) {
       return new GatewayTimeoutException(
-        'The AI provider took too long to respond.',
+        'O provedor de IA demorou demais para responder.',
       );
     }
 
@@ -184,7 +198,7 @@ export class OpenAiCompatibleClient {
     }
 
     return new BadGatewayException(
-      'Could not reach the AI provider. Please try again.',
+      'Não foi possível acessar o provedor de IA. Tente novamente.',
     );
   }
 

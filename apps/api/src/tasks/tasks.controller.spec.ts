@@ -5,9 +5,12 @@ jest.setTimeout(60000);
 
 type TaskResponse = {
   createdAt: string;
+  description: string | null;
   id: string;
   isAiGenerated: boolean;
   isCompleted: boolean;
+  label: string | null;
+  position: number;
   title: string;
   updatedAt: string;
 };
@@ -43,10 +46,13 @@ describe('TasksController HTTP', () => {
 
     expect(createResponse.status).toBe(HttpStatus.CREATED);
     expect(createdTask).toMatchObject({
+      description: null,
       isAiGenerated: false,
       isCompleted: false,
+      label: null,
       title: 'Write focused tests',
     });
+    expect(createdTask.position).toEqual(expect.any(Number));
     expect(createdTask.id).toMatchUuid();
 
     await expect(readJson<TaskResponse[]>(`${baseUrl}/tasks`)).resolves.toEqual(
@@ -55,7 +61,9 @@ describe('TasksController HTTP', () => {
 
     const updateResponse = await fetch(`${baseUrl}/tasks/${createdTask.id}`, {
       body: JSON.stringify({
+        description: '  Add regression checks before merging  ',
         isCompleted: true,
+        label: '  QA   Review ',
         title: '  Ship the coverage  ',
       }),
       headers: jsonHeaders(),
@@ -66,18 +74,46 @@ describe('TasksController HTTP', () => {
     expect(updateResponse.status).toBe(HttpStatus.OK);
     expect(updatedTask).toMatchObject({
       id: createdTask.id,
+      description: 'Add regression checks before merging',
       isCompleted: true,
+      label: 'QA Review',
       title: 'Ship the coverage',
     });
+
+    const secondCreateResponse = await fetch(`${baseUrl}/tasks`, {
+      body: JSON.stringify({ title: 'Review task order' }),
+      headers: jsonHeaders(),
+      method: 'POST',
+    });
+    const secondTask = (await secondCreateResponse.json()) as TaskResponse;
+
+    const reorderResponse = await fetch(`${baseUrl}/tasks/reorder`, {
+      body: JSON.stringify({
+        orderedIds: [updatedTask.id, secondTask.id],
+      }),
+      headers: jsonHeaders(),
+      method: 'PATCH',
+    });
+    const reorderedTasks = (await reorderResponse.json()) as TaskResponse[];
+
+    expect(reorderResponse.status).toBe(HttpStatus.OK);
+    expect(reorderedTasks.map((task) => task.id)).toEqual([
+      updatedTask.id,
+      secondTask.id,
+    ]);
+    expect(reorderedTasks.map((task) => task.position)).toEqual([0, 1]);
 
     const deleteResponse = await fetch(`${baseUrl}/tasks/${createdTask.id}`, {
       method: 'DELETE',
     });
 
     expect(deleteResponse.status).toBe(HttpStatus.NO_CONTENT);
-    await expect(readJson<TaskResponse[]>(`${baseUrl}/tasks`)).resolves.toEqual(
-      [],
-    );
+    const secondDeleteResponse = await fetch(`${baseUrl}/tasks/${secondTask.id}`, {
+      method: 'DELETE',
+    });
+
+    expect(secondDeleteResponse.status).toBe(HttpStatus.NO_CONTENT);
+    await expect(readJson<TaskResponse[]>(`${baseUrl}/tasks`)).resolves.toEqual([]);
   });
 
   it('validates DTO payloads and route params', async () => {
@@ -108,8 +144,19 @@ describe('TasksController HTTP', () => {
       HttpStatus.BAD_REQUEST,
     );
     await expectStatus(
+      fetch(`${baseUrl}/tasks/reorder`, {
+        body: JSON.stringify({ orderedIds: ['not-a-uuid'] }),
+        headers: jsonHeaders(),
+        method: 'PATCH',
+      }),
+      HttpStatus.BAD_REQUEST,
+    );
+    await expectStatus(
       fetch(`${baseUrl}/tasks/ai-generate`, {
-        body: JSON.stringify({ apiKey: '', goal: 'go' }),
+        body: JSON.stringify({
+          apiKey: 'sk-not-accepted',
+          goal: 'Generate a valid plan',
+        }),
         headers: jsonHeaders(),
         method: 'POST',
       }),
@@ -117,13 +164,11 @@ describe('TasksController HTTP', () => {
     );
   });
 
-  it('generates AI tasks without returning or storing the API key', async () => {
+  it('generates AI tasks without accepting a request API key', async () => {
     const { baseUrl } = testApp;
-    const apiKey = 'sk-secret-controller-test';
 
     const response = await fetch(`${baseUrl}/tasks/ai-generate`, {
       body: JSON.stringify({
-        apiKey,
         goal: 'Launch a deterministic review plan',
       }),
       headers: jsonHeaders(),
@@ -134,12 +179,29 @@ describe('TasksController HTTP', () => {
     expect(response.status).toBe(HttpStatus.CREATED);
     expect(payload.tasks).toHaveLength(6);
     expect(payload.tasks.every((task) => task.isAiGenerated)).toBe(true);
-    expect(JSON.stringify(payload)).not.toContain(apiKey);
 
     const persistedTasks = await readJson<TaskResponse[]>(`${baseUrl}/tasks`);
 
     expect(persistedTasks).toHaveLength(6);
-    expect(JSON.stringify(persistedTasks)).not.toContain(apiKey);
+  });
+
+  it('returns service unavailable when the server API key is missing in real provider mode', async () => {
+    const { baseUrl, close } = await startTestApp({
+      env: {
+        LLM_API_KEY: '',
+        LLM_PROVIDER: 'openai-compatible',
+      },
+    });
+
+    try {
+      await expectAiGenerateStatus(
+        baseUrl,
+        'Goal that needs a real provider',
+        HttpStatus.SERVICE_UNAVAILABLE,
+      );
+    } finally {
+      await close();
+    }
   });
 
   it('uses the route-specific throttle limit for AI generation', async () => {
@@ -220,7 +282,7 @@ async function expectAiGenerateStatus(
 ): Promise<void> {
   await expectStatus(
     fetch(`${baseUrl}/tasks/ai-generate`, {
-      body: JSON.stringify({ apiKey: 'demo-key', goal }),
+      body: JSON.stringify({ goal }),
       headers: jsonHeaders(),
       method: 'POST',
     }),

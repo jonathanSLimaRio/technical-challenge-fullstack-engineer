@@ -47,7 +47,7 @@ export function configureApp(app: INestApplication): void {
   if (shouldEnableSwagger) {
     const swaggerConfig = new DocumentBuilder()
       .setTitle('Smart To-Do List API')
-      .setDescription('Task management and AI-powered task decomposition API.')
+      .setDescription('API de gerenciamento de tarefas e decomposição com IA.')
       .setVersion('1.0')
       .build();
 
