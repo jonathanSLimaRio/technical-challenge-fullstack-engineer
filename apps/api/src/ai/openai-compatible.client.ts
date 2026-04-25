@@ -4,6 +4,7 @@ import {
   HttpException,
   HttpStatus,
   Injectable,
+  Logger,
   UnauthorizedException,
 } from '@nestjs/common';
 
@@ -27,9 +28,52 @@ type ProviderResponse = {
   choices?: ProviderChoice[];
 };
 
+const TRANSIENT_PROVIDER_STATUSES = new Set<number>([
+  HttpStatus.TOO_MANY_REQUESTS,
+  HttpStatus.BAD_GATEWAY,
+  HttpStatus.SERVICE_UNAVAILABLE,
+  HttpStatus.GATEWAY_TIMEOUT,
+]);
+
 @Injectable()
 export class OpenAiCompatibleClient {
+  private readonly logger = new Logger(OpenAiCompatibleClient.name);
+
   async createJsonCompletion(input: CompletionInput): Promise<string> {
+    const maxAttempts = 2;
+    let lastError: HttpException | undefined;
+
+    for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
+      try {
+        return await this.createJsonCompletionOnce(input);
+      } catch (error) {
+        const exception = this.toHttpException(error);
+        lastError = exception;
+
+        this.logProviderFailure(error, exception, attempt);
+
+        if (
+          attempt < maxAttempts &&
+          this.shouldRetry(error, exception)
+        ) {
+          continue;
+        }
+
+        throw exception;
+      }
+    }
+
+    throw (
+      lastError ??
+      new BadGatewayException(
+        'Could not reach the AI provider. Please try again.',
+      )
+    );
+  }
+
+  private async createJsonCompletionOnce(
+    input: CompletionInput,
+  ): Promise<string> {
     const timeoutMs = Number(process.env.LLM_TIMEOUT_MS ?? 20000);
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -66,20 +110,6 @@ export class OpenAiCompatibleClient {
       }
 
       return content;
-    } catch (error) {
-      if (this.isAbortError(error)) {
-        throw new GatewayTimeoutException(
-          'The AI provider took too long to respond.',
-        );
-      }
-
-      if (error instanceof HttpException) {
-        throw error;
-      }
-
-      throw new BadGatewayException(
-        'Could not reach the AI provider. Please try again.',
-      );
     } finally {
       clearTimeout(timeout);
     }
@@ -103,6 +133,13 @@ export class OpenAiCompatibleClient {
       return new HttpException(
         message ?? 'The AI provider rate limit was exceeded.',
         HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
+
+    if (TRANSIENT_PROVIDER_STATUSES.has(response.status)) {
+      return new HttpException(
+        message ?? `The AI provider returned HTTP ${response.status}.`,
+        response.status,
       );
     }
 
@@ -132,6 +169,57 @@ export class OpenAiCompatibleClient {
     return (
       error instanceof Error &&
       (error.name === 'AbortError' || error.message.includes('aborted'))
+    );
+  }
+
+  private toHttpException(error: unknown): HttpException {
+    if (this.isAbortError(error)) {
+      return new GatewayTimeoutException(
+        'The AI provider took too long to respond.',
+      );
+    }
+
+    if (error instanceof HttpException) {
+      return error;
+    }
+
+    return new BadGatewayException(
+      'Could not reach the AI provider. Please try again.',
+    );
+  }
+
+  private shouldRetry(error: unknown, exception: HttpException): boolean {
+    if (this.isAbortError(error)) {
+      return true;
+    }
+
+    if (!(error instanceof HttpException)) {
+      return true;
+    }
+
+    return (
+      error.constructor === HttpException &&
+      TRANSIENT_PROVIDER_STATUSES.has(exception.getStatus())
+    );
+  }
+
+  private logProviderFailure(
+    error: unknown,
+    exception: HttpException,
+    attempt: number,
+  ): void {
+    const status = exception.getStatus();
+    const event = this.isAbortError(error)
+      ? 'llm_provider_timeout'
+      : 'llm_provider_failure';
+
+    this.logger.warn(
+      JSON.stringify({
+        event,
+        attempt,
+        retryable: this.shouldRetry(error, exception),
+        status,
+      }),
     );
   }
 }

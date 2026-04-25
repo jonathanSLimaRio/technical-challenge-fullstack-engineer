@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
@@ -14,6 +15,8 @@ import { TasksEventsGateway } from './tasks-events.gateway';
 
 @Injectable()
 export class TasksService {
+  private readonly logger = new Logger(TasksService.name);
+
   constructor(
     @InjectRepository(Task)
     private readonly tasksRepository: Repository<Task>,
@@ -39,6 +42,10 @@ export class TasksService {
     });
 
     const savedTask = await this.tasksRepository.save(task);
+    this.logEvent('task_created', {
+      isAiGenerated: savedTask.isAiGenerated,
+      taskId: savedTask.id,
+    });
     this.tasksEventsGateway.emitTasksChanged('created');
 
     return savedTask;
@@ -56,6 +63,10 @@ export class TasksService {
     }
 
     const savedTask = await this.tasksRepository.save(task);
+    this.logEvent('task_updated', {
+      isCompleted: savedTask.isCompleted,
+      taskId: savedTask.id,
+    });
     this.tasksEventsGateway.emitTasksChanged('updated');
 
     return savedTask;
@@ -68,6 +79,7 @@ export class TasksService {
       throw new NotFoundException(`Task ${id} was not found.`);
     }
 
+    this.logEvent('task_deleted', { taskId: id });
     this.tasksEventsGateway.emitTasksChanged('deleted');
   }
 
@@ -89,6 +101,7 @@ export class TasksService {
       manager.save(Task, taskEntities),
     );
 
+    this.logEvent('ai_tasks_generated', { count: tasks.length });
     this.tasksEventsGateway.emitTasksChanged('generated');
 
     return tasks;
@@ -112,5 +125,9 @@ export class TasksService {
     }
 
     return normalizedTitle;
+  }
+
+  private logEvent(event: string, metadata: Record<string, unknown>): void {
+    this.logger.log(JSON.stringify({ event, ...metadata }));
   }
 }

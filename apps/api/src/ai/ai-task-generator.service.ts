@@ -1,6 +1,7 @@
 import {
   BadGatewayException,
   Injectable,
+  Logger,
   UnprocessableEntityException,
 } from '@nestjs/common';
 import {
@@ -21,9 +22,23 @@ type AiTasksPayload = {
 
 @Injectable()
 export class AiTaskGeneratorService {
+  private readonly logger = new Logger(AiTaskGeneratorService.name);
+
   constructor(private readonly client: OpenAiCompatibleClient) {}
 
   async generateTasks(input: GenerateTasksInput): Promise<string[]> {
+    if (
+      (process.env.LLM_PROVIDER ?? 'openai-compatible').toLowerCase() === 'mock'
+    ) {
+      this.logger.log(
+        JSON.stringify({
+          event: 'llm_mock_provider_used',
+          goalLength: input.goal.trim().length,
+        }),
+      );
+      return this.generateMockTasks(input.goal);
+    }
+
     const messages = this.buildMessages(input.goal);
     const rawContent = await this.client.createJsonCompletion({
       apiKey: input.apiKey,
@@ -71,6 +86,7 @@ export class AiTaskGeneratorService {
       const jsonMatch = normalizedContent.match(/\{[\s\S]*\}/);
 
       if (!jsonMatch) {
+        this.logInvalidResponse('invalid_json');
         throw new BadGatewayException(
           'The AI provider returned invalid JSON. Please try again.',
         );
@@ -79,6 +95,7 @@ export class AiTaskGeneratorService {
       try {
         return JSON.parse(jsonMatch[0]) as AiTasksPayload;
       } catch {
+        this.logInvalidResponse('invalid_json');
         throw new BadGatewayException(
           'The AI provider returned invalid JSON. Please try again.',
         );
@@ -88,6 +105,7 @@ export class AiTaskGeneratorService {
 
   private extractTitles(payload: AiTasksPayload): string[] {
     if (!Array.isArray(payload.tasks)) {
+      this.logInvalidResponse('missing_tasks_array');
       throw new BadGatewayException(
         'The AI provider returned JSON without a tasks array.',
       );
@@ -117,5 +135,21 @@ export class AiTaskGeneratorService {
     }
 
     return titles;
+  }
+
+  private generateMockTasks(goal: string): string[] {
+    const subject = goal.trim().replace(/\s+/g, ' ').slice(0, 80) || 'the goal';
+    return [
+      `Clarify the desired outcome for ${subject}`,
+      'List the smallest actionable next steps',
+      'Identify dependencies, blockers and required inputs',
+      'Prioritize the tasks by impact and urgency',
+      'Schedule the first focused execution block',
+      'Review progress and adjust the plan',
+    ];
+  }
+
+  private logInvalidResponse(reason: string): void {
+    this.logger.warn(JSON.stringify({ event: 'llm_invalid_response', reason }));
   }
 }

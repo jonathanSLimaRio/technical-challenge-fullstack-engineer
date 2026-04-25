@@ -19,7 +19,7 @@ function resolveSqlitePath(): string {
       type: 'better-sqlite3',
       database: resolveSqlitePath(),
       entities: [Task],
-      synchronize: process.env.TYPEORM_SYNCHRONIZE !== 'false',
+      synchronize: process.env.TYPEORM_SYNCHRONIZE === 'true',
     }),
   ],
 })

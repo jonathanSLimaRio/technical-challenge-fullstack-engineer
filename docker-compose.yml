@@ -7,13 +7,32 @@ services:
       PORT: 3001
       CORS_ORIGIN: http://localhost:3000
       SQLITE_PATH: /data/smart-todos.sqlite
+      ENABLE_SWAGGER: ${ENABLE_SWAGGER:-true}
       LLM_BASE_URL: ${LLM_BASE_URL:-https://openrouter.ai/api/v1}
       LLM_MODEL: ${LLM_MODEL:-openai/gpt-4o-mini}
+      LLM_PROVIDER: ${LLM_PROVIDER:-openai-compatible}
       LLM_TIMEOUT_MS: ${LLM_TIMEOUT_MS:-20000}
+      THROTTLE_LIMIT: ${THROTTLE_LIMIT:-100}
+      THROTTLE_TTL_MS: ${THROTTLE_TTL_MS:-60000}
+      AI_THROTTLE_LIMIT: ${AI_THROTTLE_LIMIT:-5}
+      AI_THROTTLE_TTL_MS: ${AI_THROTTLE_TTL_MS:-60000}
+      TYPEORM_SYNCHRONIZE: ${TYPEORM_SYNCHRONIZE:-true}
     ports:
       - "3001:3001"
     volumes:
       - sqlite-data:/data
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3001/health').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
   web:
     build:
@@ -26,7 +45,20 @@ services:
     ports:
       - "3000:3000"
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "fetch('http://localhost:3000').then((r)=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))"
+        ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
 
 volumes:
   sqlite-data:

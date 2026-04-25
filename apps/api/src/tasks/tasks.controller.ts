@@ -19,6 +19,7 @@ import {
   ApiTags,
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
+import { Throttle } from '@nestjs/throttler';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { GenerateTasksDto } from './dto/generate-tasks.dto';
 import {
@@ -27,6 +28,11 @@ import {
 } from './dto/task-response.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { TasksService } from './tasks.service';
+
+function envNumber(name: string, fallback: number): number {
+  const value = Number(process.env[name]);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 @ApiTags('tasks')
 @Controller('tasks')
@@ -69,6 +75,12 @@ export class TasksController {
   }
 
   @Post('ai-generate')
+  @Throttle({
+    default: {
+      limit: envNumber('AI_THROTTLE_LIMIT', 5),
+      ttl: envNumber('AI_THROTTLE_TTL_MS', 60000),
+    },
+  })
   @ApiOperation({ summary: 'Generate tasks from a high-level goal' })
   @ApiCreatedResponse({ type: GenerateTasksResponseDto })
   @ApiUnauthorizedResponse({ description: 'Invalid or unauthorized provider key' })
