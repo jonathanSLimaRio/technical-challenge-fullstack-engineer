@@ -5,8 +5,11 @@ import {
 } from '@playwright/test';
 
 export type TaskResponse = {
+  description?: string | null;
   id: string;
   isAiGenerated: boolean;
+  label?: string | null;
+  position?: number;
   title: string;
 };
 
@@ -37,5 +40,7 @@ export async function deleteTasksMatching(
 }
 
 export async function waitForAppReady(page: Page): Promise<void> {
-  await expect(page.getByRole('button', { name: 'Refresh tasks' })).toBeEnabled();
+  await expect(
+    page.getByRole('button', { name: 'Recarregar tarefas' }),
+  ).toBeEnabled();
 }

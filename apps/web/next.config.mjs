@@ -2,6 +2,7 @@ const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 const apiOrigin = new URL(apiUrl).origin;
 const websocketOrigin = apiOrigin.replace(/^http/, 'ws');
 const isProduction = process.env.NODE_ENV === 'production';
+const distDir = process.env.NEXT_DIST_DIR?.trim() || undefined;
 
 const securityHeaders = [
   {
@@ -32,6 +33,7 @@ if (isProduction) {
 
 /** @type {import('next').NextConfig} */
 const nextConfig = {
+  distDir,
   async headers() {
     return [
       {

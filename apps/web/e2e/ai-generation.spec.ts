@@ -6,40 +6,40 @@ import {
 } from './helpers';
 
 const staticMockTaskTitles = new Set([
-  'List the smallest actionable next steps',
-  'Identify dependencies, blockers and required inputs',
-  'Prioritize the tasks by impact and urgency',
-  'Schedule the first focused execution block',
-  'Review progress and adjust the plan',
+  'Listar os menores próximos passos acionáveis',
+  'Identificar dependências, bloqueios e entradas necessárias',
+  'Priorizar as tarefas por impacto e urgência',
+  'Agendar o primeiro bloco de execução focada',
+  'Revisar o progresso e ajustar o plano',
 ]);
 
-test('generates AI tasks from the UI without storing the provider key', async ({
+test('generates AI tasks from the UI without asking for the provider key', async ({
   page,
   request,
 }) => {
-  const goal = `E2E AI review plan ${Date.now()}`;
-  const apiKey = `sk-e2e-secret-${Date.now()}`;
-
+  const goal = `E2E plano de revisão de IA ${Date.now()}`;
   await deleteTasksMatching(request, (task) => task.title.includes(goal));
 
   try {
     await page.goto('/');
     await waitForAppReady(page);
-    await page.getByLabel('Goal').fill(goal);
-    await page.getByLabel('Provider API key').fill(apiKey);
-    await page.getByRole('button', { name: 'Generate tasks' }).click();
+    await expect(page.getByLabel('Chave da API do provedor')).toHaveCount(0);
+    await page.getByLabel('Objetivo').fill(goal);
+    await page.getByRole('button', { name: 'Gerar tarefas' }).click();
 
-    await expect(page.getByRole('status')).toContainText('6 AI tasks created.');
+    await expect(page.locator('.toast-viewport')).toContainText(
+      '6 tarefas da IA criadas.',
+    );
 
     const uniqueGeneratedTask = page
       .locator('.task-card')
-      .filter({ hasText: `Clarify the desired outcome for ${goal}` });
+      .filter({ hasText: `Esclarecer o resultado desejado para ${goal}` });
 
     await expect(uniqueGeneratedTask).toBeVisible();
 
-    await page.getByRole('button', { name: /^AI/ }).click();
+    await page.getByRole('button', { name: /^IA/ }).click();
     await expect(uniqueGeneratedTask).toBeVisible();
-    await expect(uniqueGeneratedTask).toContainText('AI generated');
+    await expect(uniqueGeneratedTask).toContainText('Gerada por IA');
 
     const browserStorage = await page.evaluate(() => ({
       localStorage: Object.entries(localStorage),
@@ -47,7 +47,9 @@ test('generates AI tasks from the UI without storing the provider key', async ({
     }));
     const cookies = await page.context().cookies();
 
-    expect(JSON.stringify({ browserStorage, cookies })).not.toContain(apiKey);
+    expect(JSON.stringify({ browserStorage, cookies })).not.toContain(
+      'sk-e2e-secret',
+    );
   } finally {
     await deleteTasksMatching(request, (task) => isGeneratedByThisTest(task, goal));
   }

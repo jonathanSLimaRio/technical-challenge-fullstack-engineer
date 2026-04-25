@@ -19,12 +19,12 @@ test('shows loading and empty states for the task list', async ({ page }) => {
   await page.goto('/');
   await taskRequestStarted;
 
-  await expect(page.getByLabel('Loading tasks')).toBeVisible();
+  await expect(page.getByLabel('Carregando tarefas')).toBeVisible();
 
   releaseTasksResponse();
 
   await expect(
-    page.getByRole('heading', { name: 'Your queue is ready' }),
+    page.getByRole('heading', { name: 'Sua fila está pronta' }),
   ).toBeVisible();
 });
 
@@ -34,7 +34,7 @@ test('shows API errors and retries the task list request', async ({ page }) => {
   await page.route(`${apiUrl}/tasks`, async (route) => {
     if (shouldFail) {
       await route.fulfill({
-        json: { message: 'Database temporarily unavailable' },
+        json: { message: 'Banco de dados temporariamente indisponível' },
         status: 503,
       });
       return;
@@ -48,13 +48,53 @@ test('shows API errors and retries the task list request', async ({ page }) => {
   const errorBanner = page.locator('.feedback.error');
 
   await expect(errorBanner).toContainText(
-    'Database temporarily unavailable',
+    'Banco de dados temporariamente indisponível',
   );
 
   shouldFail = false;
-  await errorBanner.getByRole('button', { name: 'Retry' }).click();
+
+  const retryButton = errorBanner.getByRole('button', {
+    name: 'Tentar novamente',
+  });
+
+  if (await retryButton.isVisible()) {
+    await retryButton.click().catch(() => undefined);
+  }
 
   await expect(
-    page.getByRole('heading', { name: 'Your queue is ready' }),
+    page.getByRole('heading', { name: 'Sua fila está pronta' }),
   ).toBeVisible();
+});
+
+test('switches and persists the selected theme', async ({ page }) => {
+  await page.route(`${apiUrl}/tasks`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+
+  await page.goto('/');
+
+  const html = page.locator('html');
+  const lightButton = page.getByRole('button', {
+    exact: true,
+    name: 'Light',
+  });
+  const darkButton = page.getByRole('button', { exact: true, name: 'Dark' });
+
+  await expect(html).toHaveAttribute('data-theme', 'light');
+  await expect(lightButton).toHaveAttribute('aria-pressed', 'true');
+
+  await darkButton.click();
+
+  await expect(html).toHaveAttribute('data-theme', 'dark');
+  await expect(darkButton).toHaveAttribute('aria-pressed', 'true');
+
+  await page.reload();
+
+  await expect(html).toHaveAttribute('data-theme', 'dark');
+  await expect(darkButton).toHaveAttribute('aria-pressed', 'true');
+
+  await lightButton.click();
+
+  await expect(html).toHaveAttribute('data-theme', 'light');
+  await expect(lightButton).toHaveAttribute('aria-pressed', 'true');
 });

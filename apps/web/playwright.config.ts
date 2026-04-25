@@ -43,7 +43,9 @@ export default defineConfig({
       command: 'npm run start:e2e',
       env: {
         ...process.env,
+        HOSTNAME: '127.0.0.1',
         NEXT_PUBLIC_API_URL: apiUrl,
+        PORT: '3100',
       },
       reuseExistingServer: true,
       timeout: 60_000,
