@@ -1,34 +1,5 @@
-import {
-  type APIRequestContext,
-  expect,
-  type Page,
-  test,
-} from '@playwright/test';
-
-type TaskResponse = {
-  id: string;
-  title: string;
-};
-
-const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? 'http://127.0.0.1:3101';
-
-async function deleteTasksByTitle(
-  request: APIRequestContext,
-  title: string,
-): Promise<void> {
-  const response = await request.get(`${apiUrl}/tasks`);
-  const tasks = (await response.json()) as TaskResponse[];
-
-  await Promise.all(
-    tasks
-      .filter((task) => task.title === title)
-      .map((task) => request.delete(`${apiUrl}/tasks/${task.id}`)),
-  );
-}
-
-async function waitForAppReady(page: Page): Promise<void> {
-  await expect(page.getByRole('button', { name: 'Refresh tasks' })).toBeEnabled();
-}
+import { expect, test } from '@playwright/test';
+import { deleteTasksByTitle, waitForAppReady } from './helpers';
 
 test('creates, completes, filters and deletes a manual task', async ({
   page,
