@@ -10,6 +10,7 @@ import { CreateTaskDto } from './dto/create-task.dto';
 import { GenerateTasksDto } from './dto/generate-tasks.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { Task } from './task.entity';
+import { TasksEventsGateway } from './tasks-events.gateway';
 
 @Injectable()
 export class TasksService {
@@ -17,6 +18,7 @@ export class TasksService {
     @InjectRepository(Task)
     private readonly tasksRepository: Repository<Task>,
     private readonly aiTaskGenerator: AiTaskGeneratorService,
+    private readonly tasksEventsGateway: TasksEventsGateway,
   ) {}
 
   async findAll(): Promise<Task[]> {
@@ -36,7 +38,10 @@ export class TasksService {
       isAiGenerated: options.isAiGenerated ?? false,
     });
 
-    return this.tasksRepository.save(task);
+    const savedTask = await this.tasksRepository.save(task);
+    this.tasksEventsGateway.emitTasksChanged('created');
+
+    return savedTask;
   }
 
   async update(id: string, dto: UpdateTaskDto): Promise<Task> {
@@ -50,7 +55,10 @@ export class TasksService {
       task.isCompleted = dto.isCompleted;
     }
 
-    return this.tasksRepository.save(task);
+    const savedTask = await this.tasksRepository.save(task);
+    this.tasksEventsGateway.emitTasksChanged('updated');
+
+    return savedTask;
   }
 
   async remove(id: string): Promise<void> {
@@ -59,6 +67,8 @@ export class TasksService {
     if (!result.affected) {
       throw new NotFoundException(`Task ${id} was not found.`);
     }
+
+    this.tasksEventsGateway.emitTasksChanged('deleted');
   }
 
   async generateFromGoal(dto: GenerateTasksDto): Promise<Task[]> {
@@ -75,9 +85,13 @@ export class TasksService {
       }),
     );
 
-    return this.tasksRepository.manager.transaction((manager) =>
+    const tasks = await this.tasksRepository.manager.transaction((manager) =>
       manager.save(Task, taskEntities),
     );
+
+    this.tasksEventsGateway.emitTasksChanged('generated');
+
+    return tasks;
   }
 
   private async findOneOrFail(id: string): Promise<Task> {

@@ -9,6 +9,7 @@ type Harness = {
   repository: Repository<Task>;
   service: TasksService;
   tasks: Task[];
+  tasksEventsGateway: { emitTasksChanged: jest.Mock };
 };
 
 function createHarness(): Harness {
@@ -77,6 +78,9 @@ function createHarness(): Harness {
   const aiTaskGenerator = {
     generateTasks: jest.fn(),
   };
+  const tasksEventsGateway = {
+    emitTasksChanged: jest.fn(),
+  };
 
   return {
     aiTaskGenerator,
@@ -84,20 +88,23 @@ function createHarness(): Harness {
     service: new TasksService(
       repository,
       aiTaskGenerator as unknown as AiTaskGeneratorService,
+      tasksEventsGateway,
     ),
     tasks,
+    tasksEventsGateway,
   };
 }
 
 describe(TasksService.name, () => {
   it('creates a normalized manual task', async () => {
-    const { service } = createHarness();
+    const { service, tasksEventsGateway } = createHarness();
 
     const task = await service.create({ title: '  Book    flights  ' });
 
     expect(task.title).toBe('Book flights');
     expect(task.isCompleted).toBe(false);
     expect(task.isAiGenerated).toBe(false);
+    expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('created');
   });
 
   it('lists tasks with newest first', async () => {
@@ -110,8 +117,9 @@ describe(TasksService.name, () => {
   });
 
   it('updates title and completion status', async () => {
-    const { service } = createHarness();
+    const { service, tasksEventsGateway } = createHarness();
     const task = await service.create({ title: 'Pack bags' });
+    tasksEventsGateway.emitTasksChanged.mockClear();
 
     const updated = await service.update(task.id, {
       isCompleted: true,
@@ -120,20 +128,24 @@ describe(TasksService.name, () => {
 
     expect(updated.title).toBe('Pack carry-on bag');
     expect(updated.isCompleted).toBe(true);
+    expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('updated');
   });
 
   it('deletes a task', async () => {
-    const { service, tasks } = createHarness();
+    const { service, tasks, tasksEventsGateway } = createHarness();
     const task = await service.create({ title: 'Cancel hotel hold' });
+    tasksEventsGateway.emitTasksChanged.mockClear();
 
     await service.remove(task.id);
 
     expect(tasks).toHaveLength(0);
+    expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('deleted');
     await expect(service.remove(task.id)).rejects.toBeInstanceOf(NotFoundException);
   });
 
   it('persists AI-generated tasks inside a transaction', async () => {
-    const { aiTaskGenerator, repository, service } = createHarness();
+    const { aiTaskGenerator, repository, service, tasksEventsGateway } =
+      createHarness();
     aiTaskGenerator.generateTasks.mockResolvedValue([
       'Choose destination dates',
       'Compare flight options',
@@ -147,10 +159,12 @@ describe(TasksService.name, () => {
     expect(generatedTasks).toHaveLength(2);
     expect(generatedTasks.every((task) => task.isAiGenerated)).toBe(true);
     expect(repository.manager.transaction).toHaveBeenCalledTimes(1);
+    expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('generated');
   });
 
   it('does not persist tasks when AI generation fails', async () => {
-    const { aiTaskGenerator, repository, service, tasks } = createHarness();
+    const { aiTaskGenerator, repository, service, tasks, tasksEventsGateway } =
+      createHarness();
     aiTaskGenerator.generateTasks.mockRejectedValue(new Error('provider failed'));
 
     await expect(
@@ -159,5 +173,6 @@ describe(TasksService.name, () => {
 
     expect(tasks).toHaveLength(0);
     expect(repository.manager.transaction).not.toHaveBeenCalled();
+    expect(tasksEventsGateway.emitTasksChanged).not.toHaveBeenCalled();
   });
 });
