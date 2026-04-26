@@ -119,13 +119,6 @@ export function moveTask(
   });
 }
 
-export function reorderTasks(orderedIds: string[]): Promise<Task[]> {
-  return request<Task[]>('/tasks/reorder', {
-    method: 'PATCH',
-    body: JSON.stringify({ orderedIds }),
-  });
-}
-
 export function deleteTask(id: string): Promise<void> {
   return request<void>(`/tasks/${encodeURIComponent(id)}`, {
     method: 'DELETE',
