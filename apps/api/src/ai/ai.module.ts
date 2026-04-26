@@ -1,9 +1,9 @@
 import { Module } from '@nestjs/common';
 import { AiTaskGeneratorService } from './ai-task-generator.service';
-import { OpenAiCompatibleClient } from './openai-compatible.client';
+import { LlmChatCompletionClient } from './llm-chat-completion.client';
 
 @Module({
-  providers: [AiTaskGeneratorService, OpenAiCompatibleClient],
+  providers: [AiTaskGeneratorService, LlmChatCompletionClient],
   exports: [AiTaskGeneratorService],
 })
 export class AiModule {}

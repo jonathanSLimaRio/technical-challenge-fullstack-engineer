@@ -6,8 +6,8 @@ import {
 } from '@nestjs/common';
 import {
   ChatMessage,
-  OpenAiCompatibleClient,
-} from './openai-compatible.client';
+  LlmChatCompletionClient,
+} from './llm-chat-completion.client';
 
 const MAX_GENERATED_TASKS = 10;
 const TASK_DESCRIPTION_MAX_LENGTH = 1000;
@@ -47,11 +47,11 @@ type AiTasksPayload = {
 export class AiTaskGeneratorService {
   private readonly logger = new Logger(AiTaskGeneratorService.name);
 
-  constructor(private readonly client: OpenAiCompatibleClient) {}
+  constructor(private readonly client: LlmChatCompletionClient) {}
 
   async generateTasks(input: GenerateTasksInput): Promise<GeneratedPlan> {
     if (
-      (process.env.LLM_PROVIDER ?? 'openai-compatible').toLowerCase() === 'mock'
+      (process.env.LLM_PROVIDER ?? 'huggingface').toLowerCase() === 'mock'
     ) {
       this.logger.log(
         JSON.stringify({

@@ -28,6 +28,9 @@ type ProviderResponse = {
   choices?: ProviderChoice[];
 };
 
+const DEFAULT_LLM_BASE_URL = 'https://router.huggingface.co/v1';
+const DEFAULT_LLM_MODEL = 'openai/gpt-oss-20b:cheapest';
+
 const TRANSIENT_PROVIDER_STATUSES = new Set<number>([
   HttpStatus.TOO_MANY_REQUESTS,
   HttpStatus.BAD_GATEWAY,
@@ -36,8 +39,8 @@ const TRANSIENT_PROVIDER_STATUSES = new Set<number>([
 ]);
 
 @Injectable()
-export class OpenAiCompatibleClient {
-  private readonly logger = new Logger(OpenAiCompatibleClient.name);
+export class LlmChatCompletionClient {
+  private readonly logger = new Logger(LlmChatCompletionClient.name);
 
   async createJsonCompletion(input: CompletionInput): Promise<string> {
     const maxAttempts = 2;
@@ -53,10 +56,7 @@ export class OpenAiCompatibleClient {
 
         this.logProviderFailure(error, exception, attempt);
 
-        if (
-          attempt < maxAttempts &&
-          this.shouldRetry(error, exception)
-        ) {
+        if (attempt < maxAttempts && this.shouldRetry(error, exception)) {
           continue;
         }
 
@@ -67,7 +67,7 @@ export class OpenAiCompatibleClient {
     throw (
       lastError ??
       new BadGatewayException(
-        'Não foi possível acessar o provedor de IA. Tente novamente.',
+        'Nao foi possivel acessar o provedor de IA. Tente novamente.',
       )
     );
   }
@@ -86,11 +86,9 @@ export class OpenAiCompatibleClient {
         headers: {
           Authorization: `Bearer ${apiKey}`,
           'Content-Type': 'application/json',
-          'HTTP-Referer': 'http://localhost:3000',
-          'X-Title': 'Smart To-Do List Technical Challenge',
         },
         body: JSON.stringify({
-          model: process.env.LLM_MODEL ?? 'openai/gpt-4o-mini',
+          model: process.env.LLM_MODEL ?? DEFAULT_LLM_MODEL,
           temperature: 0.2,
           response_format: { type: 'json_object' },
           messages: input.messages,
@@ -118,7 +116,7 @@ export class OpenAiCompatibleClient {
   }
 
   private completionsUrl(): string {
-    const baseUrl = process.env.LLM_BASE_URL ?? 'https://api.openai.com/v1';
+    const baseUrl = process.env.LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
     return `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
   }
 
@@ -198,7 +196,7 @@ export class OpenAiCompatibleClient {
     }
 
     return new BadGatewayException(
-      'Não foi possível acessar o provedor de IA. Tente novamente.',
+      'Nao foi possivel acessar o provedor de IA. Tente novamente.',
     );
   }
 

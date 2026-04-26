@@ -3,7 +3,7 @@ import {
   UnprocessableEntityException,
 } from '@nestjs/common';
 import { AiTaskGeneratorService } from './ai-task-generator.service';
-import { OpenAiCompatibleClient } from './openai-compatible.client';
+import { LlmChatCompletionClient } from './llm-chat-completion.client';
 
 describe(AiTaskGeneratorService.name, () => {
   const originalProvider = process.env.LLM_PROVIDER;
@@ -11,11 +11,11 @@ describe(AiTaskGeneratorService.name, () => {
     createJsonCompletion: jest.fn(),
   };
   const service = new AiTaskGeneratorService(
-    client as unknown as OpenAiCompatibleClient,
+    client as unknown as LlmChatCompletionClient,
   );
 
   beforeEach(() => {
-    process.env.LLM_PROVIDER = 'openai-compatible';
+    process.env.LLM_PROVIDER = 'huggingface';
     client.createJsonCompletion.mockReset();
   });
 

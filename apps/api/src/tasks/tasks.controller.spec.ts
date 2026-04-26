@@ -256,7 +256,7 @@ describe('TasksController HTTP', () => {
     const { baseUrl, close } = await startTestApp({
       env: {
         LLM_API_KEY: '',
-        LLM_PROVIDER: 'openai-compatible',
+        LLM_PROVIDER: 'huggingface',
       },
     });
 

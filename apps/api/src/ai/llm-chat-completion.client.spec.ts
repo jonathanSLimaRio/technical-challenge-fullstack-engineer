@@ -5,22 +5,22 @@ import {
   ServiceUnavailableException,
   UnauthorizedException,
 } from '@nestjs/common';
-import { OpenAiCompatibleClient } from './openai-compatible.client';
+import { LlmChatCompletionClient } from './llm-chat-completion.client';
 
-describe(OpenAiCompatibleClient.name, () => {
+describe(LlmChatCompletionClient.name, () => {
   const originalFetch = global.fetch;
   const originalApiKey = process.env.LLM_API_KEY;
   const originalBaseUrl = process.env.LLM_BASE_URL;
   const originalModel = process.env.LLM_MODEL;
   const originalTimeout = process.env.LLM_TIMEOUT_MS;
-  let client: OpenAiCompatibleClient;
+  let client: LlmChatCompletionClient;
 
   beforeEach(() => {
-    process.env.LLM_API_KEY = 'sk-server-test';
+    process.env.LLM_API_KEY = 'hf-server-test';
     process.env.LLM_BASE_URL = 'https://provider.test/v1';
     process.env.LLM_MODEL = 'test-model';
     process.env.LLM_TIMEOUT_MS = '1000';
-    client = new OpenAiCompatibleClient();
+    client = new LlmChatCompletionClient();
     global.fetch = jest.fn();
   });
 
@@ -33,7 +33,7 @@ describe(OpenAiCompatibleClient.name, () => {
     jest.restoreAllMocks();
   });
 
-  it('sends an OpenAI-compatible chat completion request', async () => {
+  it('sends a Hugging Face chat completion request', async () => {
     const fetchMock = global.fetch as jest.Mock;
     fetchMock.mockResolvedValue(
       new Response(
@@ -55,10 +55,40 @@ describe(OpenAiCompatibleClient.name, () => {
       expect.objectContaining({
         method: 'POST',
         headers: expect.objectContaining({
-          Authorization: 'Bearer sk-server-test',
+          Authorization: 'Bearer hf-server-test',
           'Content-Type': 'application/json',
         }),
         body: expect.stringContaining('"model":"test-model"'),
+      }),
+    );
+  });
+
+  it('uses Hugging Face defaults when base URL and model are not configured', async () => {
+    delete process.env.LLM_BASE_URL;
+    delete process.env.LLM_MODEL;
+
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"tasks":[]}' } }],
+        }),
+        { status: HttpStatus.OK },
+      ),
+    );
+
+    await expect(
+      client.createJsonCompletion({
+        messages: [{ role: 'user', content: 'Goal: Plan a trip' }],
+      }),
+    ).resolves.toBe('{"tasks":[]}');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      'https://router.huggingface.co/v1/chat/completions',
+      expect.objectContaining({
+        body: expect.stringContaining(
+          '"model":"openai/gpt-oss-20b:cheapest"',
+        ),
       }),
     );
   });
