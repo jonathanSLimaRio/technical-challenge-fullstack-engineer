@@ -9,8 +9,15 @@ import { Repository } from 'typeorm';
 import { AiTaskGeneratorService } from '../ai/ai-task-generator.service';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { GenerateTasksDto } from './dto/generate-tasks.dto';
+import { MoveTaskDto } from './dto/move-task.dto';
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { Task } from './task.entity';
+import {
+  DEFAULT_TASK_STATUS,
+  isCompletedStatus,
+  resolveTaskStatus,
+  type TaskStatus,
+} from './task-status';
 import { TasksEventsGateway } from './tasks-events.gateway';
 
 @Injectable()
@@ -38,9 +45,13 @@ export class TasksService {
     const title = this.normalizeTitle(dto.title);
     const task = this.tasksRepository.create({
       title,
-      description: null,
-      label: null,
+      description:
+        dto.description === undefined
+          ? null
+          : this.normalizeDescription(dto.description),
+      label: dto.label === undefined ? null : this.normalizeLabel(dto.label),
       position,
+      status: DEFAULT_TASK_STATUS,
       isCompleted: false,
       isAiGenerated: options.isAiGenerated ?? false,
     });
@@ -71,7 +82,11 @@ export class TasksService {
     }
 
     if (dto.isCompleted !== undefined) {
-      task.isCompleted = dto.isCompleted;
+      this.applyCompletionStatus(task, dto.isCompleted);
+    }
+
+    if (dto.status !== undefined) {
+      this.applyTaskStatus(task, dto.status);
     }
 
     const savedTask = await this.tasksRepository.save(task);
@@ -85,32 +100,8 @@ export class TasksService {
   }
 
   async reorder(orderedIds: string[]): Promise<Task[]> {
-    if (new Set(orderedIds).size !== orderedIds.length) {
-      throw new BadRequestException(
-        'A lista de tarefas nao pode conter duplicatas.',
-      );
-    }
-
     const tasks = await this.tasksRepository.find();
-
-    if (orderedIds.length !== tasks.length) {
-      throw new BadRequestException(
-        'A ordenacao deve conter todas as tarefas salvas.',
-      );
-    }
-
-    const taskById = new Map(tasks.map((task) => [task.id, task]));
-    const invalidId = orderedIds.find((id) => !taskById.has(id));
-
-    if (invalidId) {
-      throw new BadRequestException(`Tarefa ${invalidId} nao foi encontrada.`);
-    }
-
-    const orderedTasks = orderedIds.map((id, position) => {
-      const task = taskById.get(id)!;
-      task.position = position;
-      return task;
-    });
+    const orderedTasks = this.resolveOrderedTasks(orderedIds, tasks);
 
     const savedTasks = await this.tasksRepository.manager.transaction((manager) =>
       manager.save(Task, orderedTasks),
@@ -118,6 +109,46 @@ export class TasksService {
 
     this.logEvent('tasks_reordered', { count: savedTasks.length });
     this.tasksEventsGateway.emitTasksChanged('reordered');
+
+    return savedTasks.sort((left, right) => left.position - right.position);
+  }
+
+  async move(id: string, dto: MoveTaskDto): Promise<Task[]> {
+    const tasks = await this.tasksRepository.find();
+    const movingTask = tasks.find((task) => task.id === id);
+
+    if (!movingTask) {
+      throw new NotFoundException(`Tarefa ${id} nao foi encontrada.`);
+    }
+
+    const orderedTasks = this.resolveOrderedTasks(dto.orderedIds, tasks);
+
+    if (!dto.orderedIds.includes(id)) {
+      throw new BadRequestException(
+        'A tarefa movida deve estar presente na ordenacao.',
+      );
+    }
+
+    this.applyTaskStatus(movingTask, dto.status);
+    const orderedTaskById = new Map(orderedTasks.map((task) => [task.id, task]));
+    orderedTaskById.set(id, movingTask);
+
+    const movedTasks = dto.orderedIds.map((taskId, position) => {
+      const task = orderedTaskById.get(taskId)!;
+      task.position = position;
+      return task;
+    });
+
+    const savedTasks = await this.tasksRepository.manager.transaction((manager) =>
+      manager.save(Task, movedTasks),
+    );
+
+    this.logEvent('task_moved', {
+      count: savedTasks.length,
+      status: dto.status,
+      taskId: id,
+    });
+    this.tasksEventsGateway.emitTasksChanged('moved');
 
     return savedTasks.sort((left, right) => left.position - right.position);
   }
@@ -134,17 +165,24 @@ export class TasksService {
   }
 
   async generateFromGoal(dto: GenerateTasksDto): Promise<Task[]> {
-    const titles = await this.aiTaskGenerator.generateTasks({
+    const generatedTasks = await this.aiTaskGenerator.generateTasks({
       goal: dto.goal,
     });
-    const positions = await this.resolveTopPositions(titles.length);
+    const positions = await this.resolveTopPositions(generatedTasks.length);
 
-    const taskEntities = titles.map((title, index) =>
+    const taskEntities = generatedTasks.map((generatedTask, index) =>
       this.tasksRepository.create({
-        title,
-        description: null,
-        label: null,
+        title: this.normalizeTitle(generatedTask.title),
+        description:
+          generatedTask.description === null
+            ? null
+            : this.normalizeDescription(generatedTask.description),
+        label:
+          generatedTask.label === null
+            ? null
+            : this.normalizeLabel(generatedTask.label),
         position: positions[index],
+        status: DEFAULT_TASK_STATUS,
         isCompleted: false,
         isAiGenerated: true,
       }),
@@ -188,6 +226,49 @@ export class TasksService {
   private normalizeLabel(label: string): string | null {
     const normalizedLabel = label.trim().replace(/\s+/g, ' ');
     return normalizedLabel || null;
+  }
+
+  private resolveOrderedTasks(orderedIds: string[], tasks: Task[]): Task[] {
+    if (new Set(orderedIds).size !== orderedIds.length) {
+      throw new BadRequestException(
+        'A lista de tarefas nao pode conter duplicatas.',
+      );
+    }
+
+    if (orderedIds.length !== tasks.length) {
+      throw new BadRequestException(
+        'A ordenacao deve conter todas as tarefas salvas.',
+      );
+    }
+
+    const taskById = new Map(tasks.map((task) => [task.id, task]));
+    const invalidId = orderedIds.find((id) => !taskById.has(id));
+
+    if (invalidId) {
+      throw new BadRequestException(`Tarefa ${invalidId} nao foi encontrada.`);
+    }
+
+    return orderedIds.map((id, position) => {
+      const task = taskById.get(id)!;
+      task.position = position;
+      task.status = resolveTaskStatus(task.status, task.isCompleted);
+      task.isCompleted = isCompletedStatus(task.status);
+      return task;
+    });
+  }
+
+  private applyCompletionStatus(task: Task, isCompleted: boolean): void {
+    task.status = isCompleted
+      ? 'done'
+      : task.status === 'done'
+        ? DEFAULT_TASK_STATUS
+        : resolveTaskStatus(task.status, false);
+    task.isCompleted = isCompletedStatus(task.status);
+  }
+
+  private applyTaskStatus(task: Task, status: TaskStatus): void {
+    task.status = status;
+    task.isCompleted = isCompletedStatus(status);
   }
 
   private async resolveTopPositions(count: number): Promise<number[]> {

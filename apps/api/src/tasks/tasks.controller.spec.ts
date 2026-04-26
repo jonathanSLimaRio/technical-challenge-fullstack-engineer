@@ -11,6 +11,7 @@ type TaskResponse = {
   isCompleted: boolean;
   label: string | null;
   position: number;
+  status: string;
   title: string;
   updatedAt: string;
 };
@@ -38,7 +39,11 @@ describe('TasksController HTTP', () => {
     );
 
     const createResponse = await fetch(`${baseUrl}/tasks`, {
-      body: JSON.stringify({ title: '  Write    focused tests  ' }),
+      body: JSON.stringify({
+        description: '  Cover the happy path  ',
+        label: '  QA   Review ',
+        title: '  Write    focused tests  ',
+      }),
       headers: jsonHeaders(),
       method: 'POST',
     });
@@ -46,10 +51,11 @@ describe('TasksController HTTP', () => {
 
     expect(createResponse.status).toBe(HttpStatus.CREATED);
     expect(createdTask).toMatchObject({
-      description: null,
+      description: 'Cover the happy path',
       isAiGenerated: false,
       isCompleted: false,
-      label: null,
+      label: 'QA Review',
+      status: 'todo',
       title: 'Write focused tests',
     });
     expect(createdTask.position).toEqual(expect.any(Number));
@@ -77,6 +83,7 @@ describe('TasksController HTTP', () => {
       description: 'Add regression checks before merging',
       isCompleted: true,
       label: 'QA Review',
+      status: 'done',
       title: 'Ship the coverage',
     });
 
@@ -102,6 +109,28 @@ describe('TasksController HTTP', () => {
       secondTask.id,
     ]);
     expect(reorderedTasks.map((task) => task.position)).toEqual([0, 1]);
+
+    const moveResponse = await fetch(`${baseUrl}/tasks/${secondTask.id}/move`, {
+      body: JSON.stringify({
+        orderedIds: [secondTask.id, updatedTask.id],
+        status: 'doing',
+      }),
+      headers: jsonHeaders(),
+      method: 'PATCH',
+    });
+    const movedTasks = (await moveResponse.json()) as TaskResponse[];
+
+    expect(moveResponse.status).toBe(HttpStatus.OK);
+    expect(movedTasks.map((task) => task.id)).toEqual([
+      secondTask.id,
+      updatedTask.id,
+    ]);
+    expect(movedTasks[0]).toMatchObject({
+      id: secondTask.id,
+      isCompleted: false,
+      position: 0,
+      status: 'doing',
+    });
 
     const deleteResponse = await fetch(`${baseUrl}/tasks/${createdTask.id}`, {
       method: 'DELETE',
@@ -152,6 +181,17 @@ describe('TasksController HTTP', () => {
       HttpStatus.BAD_REQUEST,
     );
     await expectStatus(
+      fetch(`${baseUrl}/tasks/8cc9aa74-476d-459e-aab0-462fbe32efea/move`, {
+        body: JSON.stringify({
+          orderedIds: ['8cc9aa74-476d-459e-aab0-462fbe32efea'],
+          status: 'invalid',
+        }),
+        headers: jsonHeaders(),
+        method: 'PATCH',
+      }),
+      HttpStatus.BAD_REQUEST,
+    );
+    await expectStatus(
       fetch(`${baseUrl}/tasks/ai-generate`, {
         body: JSON.stringify({
           apiKey: 'sk-not-accepted',
@@ -179,10 +219,23 @@ describe('TasksController HTTP', () => {
     expect(response.status).toBe(HttpStatus.CREATED);
     expect(payload.tasks).toHaveLength(6);
     expect(payload.tasks.every((task) => task.isAiGenerated)).toBe(true);
+    expect(
+      payload.tasks.every((task) => task.description && task.label),
+    ).toBe(true);
+    expect(payload.tasks[0]).toMatchObject({
+      description:
+        'Definir o resultado esperado, os criterios de pronto e o que ficara fora deste plano.',
+      label: 'Planejamento',
+      title:
+        'Esclarecer o resultado desejado para Launch a deterministic review plan',
+    });
 
     const persistedTasks = await readJson<TaskResponse[]>(`${baseUrl}/tasks`);
 
     expect(persistedTasks).toHaveLength(6);
+    expect(
+      persistedTasks.every((task) => task.isAiGenerated && task.description && task.label),
+    ).toBe(true);
   });
 
   it('returns service unavailable when the server API key is missing in real provider mode', async () => {

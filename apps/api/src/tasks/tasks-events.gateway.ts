@@ -6,6 +6,7 @@ type TaskChangeAction =
   | 'created'
   | 'deleted'
   | 'generated'
+  | 'moved'
   | 'reordered'
   | 'updated';
 

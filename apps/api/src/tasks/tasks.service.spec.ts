@@ -46,6 +46,7 @@ function createHarness(): Harness {
       description: null,
       label: null,
       position: 0,
+      status: 'todo',
       isCompleted: false,
       isAiGenerated: false,
       createdAt: undefined,
@@ -118,6 +119,7 @@ describe(TasksService.name, () => {
     expect(task.description).toBeNull();
     expect(task.label).toBeNull();
     expect(task.position).toBe(0);
+    expect(task.status).toBe('todo');
     expect(task.isCompleted).toBe(false);
     expect(task.isAiGenerated).toBe(false);
     expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('created');
@@ -147,6 +149,7 @@ describe(TasksService.name, () => {
     expect(updated.title).toBe('Pack carry-on bag');
     expect(updated.description).toBe('Confirm airline baggage policy');
     expect(updated.label).toBe('Travel admin');
+    expect(updated.status).toBe('done');
     expect(updated.isCompleted).toBe(true);
     expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('updated');
   });
@@ -170,6 +173,33 @@ describe(TasksService.name, () => {
     expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith(
       'reordered',
     );
+  });
+
+  it('moves a task between lanes and persists the full order', async () => {
+    const { service, tasksEventsGateway } = createHarness();
+
+    const first = await service.create({ title: 'First task' });
+    const second = await service.create({ title: 'Second task' });
+    const third = await service.create({ title: 'Third task' });
+    tasksEventsGateway.emitTasksChanged.mockClear();
+
+    const moved = await service.move(second.id, {
+      orderedIds: [second.id, first.id, third.id],
+      status: 'blocked',
+    });
+
+    expect(moved.map((task) => task.id)).toEqual([
+      second.id,
+      first.id,
+      third.id,
+    ]);
+    expect(moved[0]).toMatchObject({
+      id: second.id,
+      isCompleted: false,
+      position: 0,
+      status: 'blocked',
+    });
+    expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('moved');
   });
 
   it('rejects invalid reorder payloads', async () => {
@@ -207,8 +237,16 @@ describe(TasksService.name, () => {
     const { aiTaskGenerator, repository, service, tasksEventsGateway } =
       createHarness();
     aiTaskGenerator.generateTasks.mockResolvedValue([
-      'Choose destination dates',
-      'Compare flight options',
+      {
+        description: 'Confirm the best window before booking anything.',
+        label: 'Planning',
+        title: 'Choose destination dates',
+      },
+      {
+        description: '  Compare nonstop and refundable routes.  ',
+        label: '  Flights   ',
+        title: 'Compare flight options',
+      },
     ]);
 
     const generatedTasks = await service.generateFromGoal({
@@ -217,6 +255,16 @@ describe(TasksService.name, () => {
 
     expect(generatedTasks).toHaveLength(2);
     expect(generatedTasks.every((task) => task.isAiGenerated)).toBe(true);
+    expect(generatedTasks[0]).toMatchObject({
+      description: 'Confirm the best window before booking anything.',
+      label: 'Planning',
+      title: 'Choose destination dates',
+    });
+    expect(generatedTasks[1]).toMatchObject({
+      description: 'Compare nonstop and refundable routes.',
+      label: 'Flights',
+      title: 'Compare flight options',
+    });
     expect(repository.manager.transaction).toHaveBeenCalledTimes(1);
     expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('generated');
   });

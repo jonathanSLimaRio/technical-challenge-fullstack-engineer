@@ -10,13 +10,29 @@ import {
 } from './openai-compatible.client';
 
 const MAX_GENERATED_TASKS = 10;
+const TASK_DESCRIPTION_MAX_LENGTH = 1000;
+const TASK_LABEL_MAX_LENGTH = 40;
+const TASK_TITLE_MAX_LENGTH = 160;
+
+export type GeneratedTask = {
+  description: string | null;
+  label: string | null;
+  title: string;
+};
 
 type GenerateTasksInput = {
   goal: string;
 };
 
 type AiTasksPayload = {
-  tasks?: Array<{ title?: unknown } | string>;
+  tasks?: Array<
+    | {
+        description?: unknown;
+        label?: unknown;
+        title?: unknown;
+      }
+    | string
+  >;
 };
 
 @Injectable()
@@ -25,7 +41,7 @@ export class AiTaskGeneratorService {
 
   constructor(private readonly client: OpenAiCompatibleClient) {}
 
-  async generateTasks(input: GenerateTasksInput): Promise<string[]> {
+  async generateTasks(input: GenerateTasksInput): Promise<GeneratedTask[]> {
     if (
       (process.env.LLM_PROVIDER ?? 'openai-compatible').toLowerCase() === 'mock'
     ) {
@@ -44,15 +60,15 @@ export class AiTaskGeneratorService {
     });
 
     const payload = this.parsePayload(rawContent);
-    const titles = this.extractTitles(payload);
+    const tasks = this.extractTasks(payload);
 
-    if (titles.length === 0) {
+    if (tasks.length === 0) {
       throw new UnprocessableEntityException(
-        'A resposta da IA não incluiu tarefas acionáveis.',
+        'A resposta da IA nao incluiu tarefas acionaveis.',
       );
     }
 
-    return titles;
+    return tasks;
   }
 
   private buildMessages(goal: string): ChatMessage[] {
@@ -62,7 +78,7 @@ export class AiTaskGeneratorService {
       {
         role: 'system',
         content:
-          'Você é um assistente de planejamento preciso. Divida o objetivo do usuário em tarefas concretas e acionáveis. Retorne apenas JSON válido no formato {"tasks":[{"title":"..."}]}. Use de 4 a 8 tarefas. Mantenha cada título com menos de 120 caracteres. Não inclua markdown.',
+          'Voce e um assistente de planejamento preciso. Divida o objetivo do usuario em tarefas concretas e acionaveis. Retorne apenas JSON valido no formato {"tasks":[{"title":"...","description":"...","label":"..."}]}. Use de 4 a 8 tarefas. Mantenha cada title com ate 160 caracteres, cada description com ate 1000 caracteres e cada label com ate 40 caracteres. Nao inclua markdown.',
       },
       {
         role: 'user',
@@ -86,7 +102,7 @@ export class AiTaskGeneratorService {
       if (!jsonMatch) {
         this.logInvalidResponse('invalid_json');
         throw new BadGatewayException(
-          'O provedor de IA retornou JSON inválido. Tente novamente.',
+          'O provedor de IA retornou JSON invalido. Tente novamente.',
         );
       }
 
@@ -95,13 +111,13 @@ export class AiTaskGeneratorService {
       } catch {
         this.logInvalidResponse('invalid_json');
         throw new BadGatewayException(
-          'O provedor de IA retornou JSON inválido. Tente novamente.',
+          'O provedor de IA retornou JSON invalido. Tente novamente.',
         );
       }
     }
   }
 
-  private extractTitles(payload: AiTasksPayload): string[] {
+  private extractTasks(payload: AiTasksPayload): GeneratedTask[] {
     if (!Array.isArray(payload.tasks)) {
       this.logInvalidResponse('missing_tasks_array');
       throw new BadGatewayException(
@@ -110,7 +126,7 @@ export class AiTaskGeneratorService {
     }
 
     const seen = new Set<string>();
-    const titles: string[] = [];
+    const tasks: GeneratedTask[] = [];
 
     for (const item of payload.tasks) {
       const rawTitle = typeof item === 'string' ? item : item.title;
@@ -119,33 +135,99 @@ export class AiTaskGeneratorService {
         continue;
       }
 
-      const title = rawTitle.trim().replace(/\s+/g, ' ');
+      const title = this.normalizeTitle(rawTitle);
       const key = title.toLocaleLowerCase();
 
-      if (title && title.length <= 160 && !seen.has(key)) {
+      if (title && title.length <= TASK_TITLE_MAX_LENGTH && !seen.has(key)) {
         seen.add(key);
-        titles.push(title);
+        tasks.push({
+          description:
+            typeof item === 'string'
+              ? null
+              : this.normalizeDescription(item.description),
+          label:
+            typeof item === 'string' ? null : this.normalizeLabel(item.label),
+          title,
+        });
       }
 
-      if (titles.length === MAX_GENERATED_TASKS) {
+      if (tasks.length === MAX_GENERATED_TASKS) {
         break;
       }
     }
 
-    return titles;
+    return tasks;
   }
 
-  private generateMockTasks(goal: string): string[] {
+  private generateMockTasks(goal: string): GeneratedTask[] {
     const subject =
       goal.trim().replace(/\s+/g, ' ').slice(0, 80) || 'o objetivo';
+
     return [
-      `Esclarecer o resultado desejado para ${subject}`,
-      'Listar os menores próximos passos acionáveis',
-      'Identificar dependências, bloqueios e entradas necessárias',
-      'Priorizar as tarefas por impacto e urgência',
-      'Agendar o primeiro bloco de execução focada',
-      'Revisar o progresso e ajustar o plano',
+      {
+        title: `Esclarecer o resultado desejado para ${subject}`,
+        description:
+          'Definir o resultado esperado, os criterios de pronto e o que ficara fora deste plano.',
+        label: 'Planejamento',
+      },
+      {
+        title: 'Listar os menores proximos passos acionaveis',
+        description:
+          'Transformar o objetivo em acoes pequenas o suficiente para iniciar sem nova decisao.',
+        label: 'Escopo',
+      },
+      {
+        title: 'Identificar dependencias, bloqueios e entradas necessarias',
+        description:
+          'Mapear recursos, informacoes, acessos e riscos que podem travar a execucao.',
+        label: 'Dependencias',
+      },
+      {
+        title: 'Priorizar as tarefas por impacto e urgencia',
+        description:
+          'Ordenar o trabalho para atacar primeiro o que reduz maior risco ou libera mais progresso.',
+        label: 'Prioridade',
+      },
+      {
+        title: 'Agendar o primeiro bloco de execucao focada',
+        description:
+          'Reservar um intervalo concreto para iniciar a primeira tarefa e registrar o proximo marco.',
+        label: 'Execucao',
+      },
+      {
+        title: 'Revisar o progresso e ajustar o plano',
+        description:
+          'Comparar o andamento com o resultado desejado e atualizar tarefas, ordem e bloqueios.',
+        label: 'Revisao',
+      },
     ];
+  }
+
+  private normalizeTitle(title: string): string {
+    return title.trim().replace(/\s+/g, ' ');
+  }
+
+  private normalizeDescription(description: unknown): string | null {
+    if (typeof description !== 'string') {
+      return null;
+    }
+
+    const normalizedDescription = description.trim();
+    return normalizedDescription
+      ? normalizedDescription.slice(0, TASK_DESCRIPTION_MAX_LENGTH).trim() ||
+          null
+      : null;
+  }
+
+  private normalizeLabel(label: unknown): string | null {
+    if (typeof label !== 'string') {
+      return null;
+    }
+
+    const normalizedLabel = label.trim().replace(/\s+/g, ' ');
+    return normalizedLabel
+      ? normalizedLabel.slice(0, TASK_LABEL_MAX_LENGTH).trim() || null
+      : null;
   }
 
   private logInvalidResponse(reason: string): void {

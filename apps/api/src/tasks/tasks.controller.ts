@@ -23,6 +23,7 @@ import {
 import { Throttle } from '@nestjs/throttler';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { GenerateTasksDto } from './dto/generate-tasks.dto';
+import { MoveTaskDto } from './dto/move-task.dto';
 import { ReorderTasksDto } from './dto/reorder-tasks.dto';
 import {
   GenerateTasksResponseDto,
@@ -62,6 +63,17 @@ export class TasksController {
   @ApiOkResponse({ type: [TaskResponseDto] })
   async reorder(@Body() dto: ReorderTasksDto): Promise<TaskResponseDto[]> {
     const tasks = await this.tasksService.reorder(dto.orderedIds);
+    return tasks.map(TaskResponseDto.fromEntity);
+  }
+
+  @Patch(':id/move')
+  @ApiOperation({ summary: 'Move uma tarefa entre raias e persiste a ordem' })
+  @ApiOkResponse({ type: [TaskResponseDto] })
+  async move(
+    @Param('id', ParseUUIDPipe) id: string,
+    @Body() dto: MoveTaskDto,
+  ): Promise<TaskResponseDto[]> {
+    const tasks = await this.tasksService.move(id, dto);
     return tasks.map(TaskResponseDto.fromEntity);
   }
 

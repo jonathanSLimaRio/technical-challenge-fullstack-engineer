@@ -1,5 +1,11 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { Task } from '../task.entity';
+import {
+  isCompletedStatus,
+  resolveTaskStatus,
+  TASK_STATUSES,
+  type TaskStatus,
+} from '../task-status';
 
 export class TaskResponseDto {
   @ApiProperty()
@@ -17,6 +23,9 @@ export class TaskResponseDto {
   @ApiProperty()
   position!: number;
 
+  @ApiProperty({ enum: TASK_STATUSES })
+  status!: TaskStatus;
+
   @ApiProperty()
   isCompleted!: boolean;
 
@@ -30,13 +39,16 @@ export class TaskResponseDto {
   updatedAt!: Date;
 
   static fromEntity(task: Task): TaskResponseDto {
+    const status = resolveTaskStatus(task.status, task.isCompleted);
+
     return {
       id: task.id,
       title: task.title,
       description: task.description,
       label: task.label,
       position: task.position,
-      isCompleted: task.isCompleted,
+      status,
+      isCompleted: isCompletedStatus(status),
       isAiGenerated: task.isAiGenerated,
       createdAt: task.createdAt,
       updatedAt: task.updatedAt,

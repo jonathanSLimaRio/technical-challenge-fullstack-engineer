@@ -1,5 +1,6 @@
 import { ApiPropertyOptional } from '@nestjs/swagger';
-import { IsBoolean, IsOptional, IsString, Length } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, Length } from 'class-validator';
+import { TASK_STATUSES, type TaskStatus } from '../task-status';
 
 export class UpdateTaskDto {
   @ApiPropertyOptional({ example: 'Reservar voos reembolsaveis', maxLength: 160 })
@@ -33,4 +34,11 @@ export class UpdateTaskDto {
   @IsOptional()
   @IsBoolean({ message: 'O status de conclusao deve ser verdadeiro ou falso.' })
   isCompleted?: boolean;
+
+  @ApiPropertyOptional({ enum: TASK_STATUSES, example: 'doing' })
+  @IsOptional()
+  @IsIn(TASK_STATUSES, {
+    message: 'O status da tarefa deve ser todo, doing, blocked ou done.',
+  })
+  status?: TaskStatus;
 }

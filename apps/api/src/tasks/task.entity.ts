@@ -5,6 +5,7 @@ import {
   PrimaryGeneratedColumn,
   UpdateDateColumn,
 } from 'typeorm';
+import { DEFAULT_TASK_STATUS, type TaskStatus } from './task-status';
 
 @Entity({ name: 'tasks' })
 export class Task {
@@ -22,6 +23,9 @@ export class Task {
 
   @Column({ type: 'integer', default: 0 })
   position!: number;
+
+  @Column({ type: 'varchar', length: 16, default: DEFAULT_TASK_STATUS })
+  status!: TaskStatus;
 
   @Column({ name: 'is_completed', type: 'boolean', default: false })
   isCompleted!: boolean;
