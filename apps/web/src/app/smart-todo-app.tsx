@@ -31,6 +31,7 @@ import {
   ListChecks,
   Loader2,
   Moon,
+  Pencil,
   Plus,
   RefreshCw,
   Save,
@@ -61,6 +62,7 @@ import type { Theme } from './theme';
 import { useThemePreference } from './use-theme-preference';
 
 type TaskFilter = 'all' | 'pending' | 'done' | 'ai';
+type MobileStatusFilter = 'all' | TaskStatus;
 type TaskLane = {
   label: string;
   status: TaskStatus;
@@ -75,7 +77,7 @@ const DONE_STATUS: TaskStatus = 'done';
 const TASK_LANES: TaskLane[] = [
   { label: 'A Fazer', status: 'todo' },
   { label: 'Fazendo', status: 'doing' },
-  { label: 'Block', status: 'blocked' },
+  { label: 'Bloqueadas', status: 'blocked' },
   { label: 'Concluído', status: 'done' },
 ];
 
@@ -122,6 +124,14 @@ const emptyFilterTitles: Record<TaskFilter, string> = {
   all: 'Nenhuma tarefa',
   done: 'Nenhuma tarefa concluída',
   pending: 'Nenhuma tarefa pendente',
+};
+
+const emptyMobileFilterTitles: Record<MobileStatusFilter, string> = {
+  all: 'Nenhuma tarefa',
+  blocked: 'Nenhuma tarefa bloqueada',
+  doing: 'Nenhuma tarefa em andamento',
+  done: 'Nenhuma tarefa concluída',
+  todo: 'Nenhuma tarefa a fazer',
 };
 
 const describedBy = (
@@ -281,6 +291,17 @@ function getTasksByStatus(tasks: Task[]): Record<TaskStatus, Task[]> {
   return grouped;
 }
 
+function getTasksByMobileStatus(
+  rootTasks: Task[],
+  filter: MobileStatusFilter,
+): Task[] {
+  if (filter === 'all') {
+    return rootTasks;
+  }
+
+  return rootTasks.filter((task) => getTaskStatus(task) === filter);
+}
+
 function getDragTargetStatus(tasks: Task[], overId: string): TaskStatus | null {
   if (isTaskStatus(overId)) {
     return overId;
@@ -382,6 +403,8 @@ export function SmartTodoApp() {
   const [manualLabel, setManualLabel] = useState('');
   const [goal, setGoal] = useState('');
   const [activeFilter, setActiveFilter] = useState<TaskFilter>('all');
+  const [activeMobileStatus, setActiveMobileStatus] =
+    useState<MobileStatusFilter>('all');
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
@@ -399,6 +422,8 @@ export function SmartTodoApp() {
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
   const [isReordering, setIsReordering] = useState(false);
   const [isSavingTaskDetails, setIsSavingTaskDetails] = useState(false);
+  const [isMobileTaskFlow, setIsMobileTaskFlow] = useState(false);
+  const modalReturnFocusRef = useRef<HTMLElement | null>(null);
   const [theme, setThemePreference] = useThemePreference();
   const { dismissToast, showToast, toasts } = useToastQueue();
   const sensors = useSensors(
@@ -443,6 +468,14 @@ export function SmartTodoApp() {
     () => getVisibleLanes(activeFilter),
     [activeFilter],
   );
+  const mobileFilteredRootTasks = useMemo(
+    () => getTasksByMobileStatus(rootTasks, activeMobileStatus),
+    [activeMobileStatus, rootTasks],
+  );
+  const rootTasksByStatus = useMemo(
+    () => getTasksByStatus(rootTasks),
+    [rootTasks],
+  );
 
   const filters = useMemo(
     () => [
@@ -478,6 +511,47 @@ export function SmartTodoApp() {
     [stats],
   );
 
+  const mobileStatusTabs = useMemo(
+    () => [
+      {
+        count: rootTasks.length,
+        icon: <LayoutList size={16} aria-hidden="true" />,
+        label: 'Todas',
+        tooltip: 'Mostrar todas as tarefas.',
+        value: 'all' as const,
+      },
+      {
+        count: rootTasksByStatus.todo.length,
+        icon: <Circle size={16} aria-hidden="true" />,
+        label: 'A Fazer',
+        tooltip: 'Mostrar tarefas a fazer.',
+        value: 'todo' as const,
+      },
+      {
+        count: rootTasksByStatus.doing.length,
+        icon: <Clock3 size={16} aria-hidden="true" />,
+        label: 'Fazendo',
+        tooltip: 'Mostrar tarefas em andamento.',
+        value: 'doing' as const,
+      },
+      {
+        count: rootTasksByStatus.blocked.length,
+        icon: <AlertCircle size={16} aria-hidden="true" />,
+        label: 'Bloqueadas',
+        tooltip: 'Mostrar tarefas bloqueadas.',
+        value: 'blocked' as const,
+      },
+      {
+        count: rootTasksByStatus.done.length,
+        icon: <CheckCircle2 size={16} aria-hidden="true" />,
+        label: 'Concluídas',
+        tooltip: 'Mostrar tarefas concluídas.',
+        value: 'done' as const,
+      },
+    ],
+    [rootTasks.length, rootTasksByStatus],
+  );
+
   useEffect(() => {
     const socket = io(getApiOrigin(), {
       reconnectionAttempts: 5,
@@ -494,6 +568,43 @@ export function SmartTodoApp() {
       socket.disconnect();
     };
   }, [mutate]);
+
+  useEffect(() => {
+    const mediaQuery = window.matchMedia('(max-width: 640px)');
+    const handleChange = () => setIsMobileTaskFlow(mediaQuery.matches);
+
+    handleChange();
+    mediaQuery.addEventListener('change', handleChange);
+
+    return () => {
+      mediaQuery.removeEventListener('change', handleChange);
+    };
+  }, []);
+
+  function rememberModalReturnFocus() {
+    if (typeof document === 'undefined') {
+      return;
+    }
+
+    const activeElement = document.activeElement;
+
+    if (
+      activeElement instanceof HTMLElement &&
+      !activeElement.closest('[role="dialog"]')
+    ) {
+      modalReturnFocusRef.current = activeElement;
+    }
+  }
+
+  function restoreModalReturnFocus() {
+    const element = modalReturnFocusRef.current;
+
+    window.setTimeout(() => {
+      if (element?.isConnected) {
+        element.focus();
+      }
+    }, 0);
+  }
 
   async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -515,7 +626,9 @@ export function SmartTodoApp() {
       setManualDescription('');
       setManualLabel('');
       setIsQuickCaptureOpen(false);
+      restoreModalReturnFocus();
       setActiveFilter('all');
+      setActiveMobileStatus('all');
       await mutate((currentTasks = []) => [createdTask, ...currentTasks], {
         revalidate: false,
       });
@@ -528,6 +641,7 @@ export function SmartTodoApp() {
   }
 
   function handleOpenQuickCapture() {
+    rememberModalReturnFocus();
     setManualTitle('');
     setManualDescription('');
     setManualLabel('');
@@ -540,6 +654,7 @@ export function SmartTodoApp() {
     }
 
     setIsQuickCaptureOpen(false);
+    restoreModalReturnFocus();
   }
 
   async function handleGenerateTasks(event: FormEvent<HTMLFormElement>) {
@@ -555,6 +670,7 @@ export function SmartTodoApp() {
       const generatedTasks = await generateTasks(normalizedGoal);
       setGoal('');
       setActiveFilter('all');
+      setActiveMobileStatus('all');
       await mutate((currentTasks = []) => [...generatedTasks, ...currentTasks], {
         revalidate: false,
       });
@@ -628,6 +744,7 @@ export function SmartTodoApp() {
   }
 
   function handleOpenTaskDetails(task: Task) {
+    rememberModalReturnFocus();
     setEditingTask(task);
     setEditTitle(task.title);
     setEditDescription(task.description ?? '');
@@ -640,6 +757,7 @@ export function SmartTodoApp() {
     }
 
     setEditingTask(null);
+    restoreModalReturnFocus();
   }
 
   async function handleSaveTaskDetails(event: FormEvent<HTMLFormElement>) {
@@ -685,6 +803,7 @@ export function SmartTodoApp() {
         { revalidate: false },
       );
       setEditingTask(null);
+      restoreModalReturnFocus();
       showToast({ type: 'success', message: 'Detalhes da tarefa salvos.' });
     } catch (requestError) {
       await mutate(previousTasks, { revalidate: false });
@@ -743,6 +862,36 @@ export function SmartTodoApp() {
       showToast({ type: 'error', message: getErrorMessage(requestError) });
     } finally {
       setIsReordering(false);
+    }
+  }
+
+  async function handleMoveTaskStatus(task: Task, targetStatus: TaskStatus) {
+    if (isReordering || getTaskStatus(task) === targetStatus) {
+      return;
+    }
+
+    const previousTasks = tasks;
+    const nextRootTasks = rootTasks.map((item) =>
+      item.id === task.id ? withTaskStatus(item, targetStatus) : item,
+    );
+    const nextTasks = mergeRootTasks(tasks, nextRootTasks);
+    const orderedIds = nextRootTasks.map((item) => item.id);
+
+    setPending(task.id, true);
+    await mutate(nextTasks, { revalidate: false });
+
+    try {
+      const movedTasks = await moveTask(task.id, {
+        orderedIds,
+        status: targetStatus,
+      });
+      await mutate(movedTasks, { revalidate: false });
+      showToast({ type: 'success', message: 'Status atualizado.' });
+    } catch (requestError) {
+      await mutate(previousTasks, { revalidate: false });
+      showToast({ type: 'error', message: getErrorMessage(requestError) });
+    } finally {
+      setPending(task.id, false);
     }
   }
 
@@ -939,6 +1088,9 @@ export function SmartTodoApp() {
                       type="button"
                     >
                       <Plus size={19} aria-hidden="true" />
+                      <span className="mobile-action-label" aria-hidden="true">
+                        Nova
+                      </span>
                       <span className="sr-only">Abrir captura rápida</span>
                     </button>
                   )}
@@ -960,6 +1112,9 @@ export function SmartTodoApp() {
                         size={19}
                         aria-hidden="true"
                       />
+                      <span className="mobile-action-label" aria-hidden="true">
+                        Recarregar
+                      </span>
                       <span className="sr-only">Recarregar tarefas</span>
                     </button>
                   )}
@@ -967,33 +1122,71 @@ export function SmartTodoApp() {
               </div>
             </div>
 
-            <div className="filter-tabs" aria-label="Filtrar tarefas">
-              {filters.map((filter) => (
-                <Tooltip
-                  className="tooltip-fill"
-                  content={filter.tooltip}
-                  key={filter.value}
-                >
-                  {(tooltipId) => (
-                    <button
-                      aria-describedby={tooltipId}
-                      aria-pressed={activeFilter === filter.value}
-                      className={
-                        activeFilter === filter.value
-                          ? 'filter-tab active'
-                          : 'filter-tab'
-                      }
-                      onClick={() => setActiveFilter(filter.value)}
-                      type="button"
-                    >
-                      {filter.icon}
-                      <span>{filter.label}</span>
-                      <strong>{filter.count}</strong>
-                    </button>
-                  )}
-                </Tooltip>
-              ))}
-            </div>
+            {!isMobileTaskFlow ? (
+              <div
+                className="filter-tabs desktop-filter-tabs"
+                aria-label="Filtrar tarefas"
+              >
+                {filters.map((filter) => (
+                  <Tooltip
+                    className="tooltip-fill"
+                    content={filter.tooltip}
+                    key={filter.value}
+                  >
+                    {(tooltipId) => (
+                      <button
+                        aria-describedby={tooltipId}
+                        aria-pressed={activeFilter === filter.value}
+                        className={
+                          activeFilter === filter.value
+                            ? 'filter-tab active'
+                            : 'filter-tab'
+                        }
+                        onClick={() => setActiveFilter(filter.value)}
+                        type="button"
+                      >
+                        {filter.icon}
+                        <span>{filter.label}</span>
+                        <strong>{filter.count}</strong>
+                      </button>
+                    )}
+                  </Tooltip>
+                ))}
+              </div>
+            ) : null}
+
+            {isMobileTaskFlow ? (
+              <div
+                className="mobile-status-tabs"
+                aria-label="Filtrar tarefas por status"
+              >
+                {mobileStatusTabs.map((filter) => (
+                  <Tooltip
+                    className="tooltip-fill"
+                    content={filter.tooltip}
+                    key={filter.value}
+                  >
+                    {(tooltipId) => (
+                      <button
+                        aria-describedby={tooltipId}
+                        aria-pressed={activeMobileStatus === filter.value}
+                        className={
+                          activeMobileStatus === filter.value
+                            ? 'filter-tab active'
+                            : 'filter-tab'
+                        }
+                        onClick={() => setActiveMobileStatus(filter.value)}
+                        type="button"
+                      >
+                        {filter.icon}
+                        <span>{filter.label}</span>
+                        <strong>{filter.count}</strong>
+                      </button>
+                    )}
+                  </Tooltip>
+                ))}
+              </div>
+            ) : null}
 
             {error ? (
               <div className="feedback error" role="alert">
@@ -1028,7 +1221,9 @@ export function SmartTodoApp() {
                 />
               ) : null}
 
-              {!isLoading &&
+              {!isMobileTaskFlow ? (
+                <div className="desktop-task-surface">
+                {!isLoading &&
               !error &&
               rootTasks.length > 0 &&
               filteredRootTasks.length === 0 ? (
@@ -1074,6 +1269,42 @@ export function SmartTodoApp() {
                   </div>
                 </DndContext>
               ) : null}
+                </div>
+              ) : null}
+
+              {isMobileTaskFlow && !isLoading && !error && tasks.length > 0 ? (
+                <div className="mobile-task-surface">
+                  {rootTasks.length > 0 &&
+                  mobileFilteredRootTasks.length === 0 ? (
+                    <EmptyState
+                      actionIcon={<LayoutList size={18} aria-hidden="true" />}
+                      actionLabel="Mostrar todas as tarefas"
+                      actionTooltip={tooltipCopy.showAll}
+                      description="Ainda nao ha tarefas neste status."
+                      onAction={() => setActiveMobileStatus('all')}
+                      title={emptyMobileFilterTitles[activeMobileStatus]}
+                    />
+                  ) : null}
+
+                  {mobileFilteredRootTasks.length > 0 ? (
+                    <MobileTaskList
+                      confirmingDeleteId={confirmingDeleteId}
+                      expandedTaskIds={expandedTaskIds}
+                      isDisabled={isReordering}
+                      onCancelDelete={() => setConfirmingDeleteId(null)}
+                      onDelete={handleDeleteTask}
+                      onOpenDetails={handleOpenTaskDetails}
+                      onStartDelete={handleStartDelete}
+                      onStatusChange={handleMoveTaskStatus}
+                      onToggleExpandedTask={handleToggleExpandedTask}
+                      onToggle={handleToggleTask}
+                      pendingIds={pendingIds}
+                      tasksByParent={tasksByParent}
+                      tasks={mobileFilteredRootTasks}
+                    />
+                  ) : null}
+                </div>
+              ) : null}
             </div>
           </div>
         </section>
@@ -1096,6 +1327,7 @@ export function SmartTodoApp() {
 
       {editingTask ? (
         <TaskFormModal
+          key={editingTask.id}
           description={editDescription}
           isSaving={isSavingTaskDetails}
           label={editLabel}
@@ -1115,6 +1347,372 @@ export function SmartTodoApp() {
 
       <ToastViewport onDismiss={dismissToast} toasts={toasts} />
     </main>
+  );
+}
+
+function MobileTaskList({
+  confirmingDeleteId,
+  expandedTaskIds,
+  isDisabled,
+  onCancelDelete,
+  onDelete,
+  onOpenDetails,
+  onStartDelete,
+  onStatusChange,
+  onToggleExpandedTask,
+  onToggle,
+  pendingIds,
+  tasksByParent,
+  tasks,
+}: {
+  confirmingDeleteId: string | null;
+  expandedTaskIds: Set<string>;
+  isDisabled: boolean;
+  onCancelDelete: () => void;
+  onDelete: (task: Task) => void | Promise<void>;
+  onOpenDetails: (task: Task) => void;
+  onStartDelete: (taskId: string) => void;
+  onStatusChange: (task: Task, status: TaskStatus) => void | Promise<void>;
+  onToggleExpandedTask: (taskId: string) => void;
+  onToggle: (task: Task) => void | Promise<void>;
+  pendingIds: Set<string>;
+  tasksByParent: Map<string, Task[]>;
+  tasks: Task[];
+}) {
+  return (
+    <ul className="mobile-task-list" aria-label="Tarefas em lista">
+      {tasks.map((task) => (
+        <MobileTaskCard
+          isConfirmingDelete={confirmingDeleteId === task.id}
+          isDisabled={isDisabled}
+          isExpanded={expandedTaskIds.has(task.id)}
+          isPending={pendingIds.has(task.id)}
+          key={task.id}
+          onCancelDelete={onCancelDelete}
+          onDelete={onDelete}
+          onOpenDetails={onOpenDetails}
+          onStartDelete={onStartDelete}
+          onStatusChange={onStatusChange}
+          onToggleExpandedTask={onToggleExpandedTask}
+          onToggle={onToggle}
+          pendingIds={pendingIds}
+          task={task}
+          subtasks={tasksByParent.get(task.id) ?? []}
+        />
+      ))}
+    </ul>
+  );
+}
+
+function MobileTaskCard({
+  isConfirmingDelete,
+  isDisabled,
+  isExpanded,
+  isPending,
+  onCancelDelete,
+  onDelete,
+  onOpenDetails,
+  onStartDelete,
+  onStatusChange,
+  onToggleExpandedTask,
+  onToggle,
+  pendingIds,
+  subtasks,
+  task,
+}: {
+  isConfirmingDelete: boolean;
+  isDisabled: boolean;
+  isExpanded: boolean;
+  isPending: boolean;
+  onCancelDelete: () => void;
+  onDelete: (task: Task) => void | Promise<void>;
+  onOpenDetails: (task: Task) => void;
+  onStartDelete: (taskId: string) => void;
+  onStatusChange: (task: Task, status: TaskStatus) => void | Promise<void>;
+  onToggleExpandedTask: (taskId: string) => void;
+  onToggle: (task: Task) => void | Promise<void>;
+  pendingIds: Set<string>;
+  subtasks: Task[];
+  task: Task;
+}) {
+  const status = getTaskStatus(task);
+  const description = task.description?.trim();
+  const label = task.label?.trim();
+  const completedSubtasks = subtasks.filter(
+    (subtask) => getTaskStatus(subtask) === DONE_STATUS,
+  ).length;
+  const subtaskProgress =
+    subtasks.length > 0
+      ? Math.round((completedSubtasks / subtasks.length) * 100)
+      : 0;
+  const className = [
+    'task-card',
+    'mobile-task-card',
+    `status-${status}`,
+    subtasks.length > 0 ? 'has-subtasks' : '',
+    isExpanded ? 'expanded' : '',
+    status === DONE_STATUS ? 'done' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <li className={className}>
+      <div className="task-card-actions mobile-card-actions">
+        <Tooltip
+          className="tooltip-control"
+          content={
+            status === DONE_STATUS
+              ? tooltipCopy.markPending
+              : tooltipCopy.markDone
+          }
+        >
+          {(tooltipId) => (
+            <button
+              aria-describedby={tooltipId}
+              className="toggle-button"
+              disabled={isPending}
+              onClick={() => void onToggle(task)}
+              type="button"
+            >
+              {status === DONE_STATUS ? (
+                <CheckCircle2 size={21} aria-hidden="true" />
+              ) : (
+                <Circle size={21} aria-hidden="true" />
+              )}
+              <span className="mobile-action-label" aria-hidden="true">
+                {status === DONE_STATUS ? 'Reabrir' : 'Concluir'}
+              </span>
+              <span className="sr-only">
+                {status === DONE_STATUS
+                  ? 'Marcar como pendente'
+                  : 'Marcar como concluída'}
+              </span>
+            </button>
+          )}
+        </Tooltip>
+
+        {isConfirmingDelete ? (
+          <div className="confirm-actions">
+            <Tooltip
+              className="tooltip-control"
+              content={tooltipCopy.confirmDelete}
+            >
+              {(tooltipId) => (
+                <button
+                  aria-describedby={tooltipId}
+                  className="mini-button danger"
+                  disabled={isPending}
+                  onClick={() => void onDelete(task)}
+                  type="button"
+                >
+                  {isPending ? (
+                    <Loader2 className="spin" size={16} aria-hidden="true" />
+                  ) : (
+                    <Trash2 size={16} aria-hidden="true" />
+                  )}
+                  Excluir
+                </button>
+              )}
+            </Tooltip>
+            <Tooltip
+              className="tooltip-control tooltip-end"
+              content={tooltipCopy.cancelDelete}
+            >
+              {(tooltipId) => (
+                <button
+                  aria-describedby={tooltipId}
+                  className="icon-button neutral small"
+                  disabled={isPending}
+                  onClick={onCancelDelete}
+                  type="button"
+                >
+                  <X size={17} aria-hidden="true" />
+                  <span className="mobile-action-label" aria-hidden="true">
+                    Cancelar
+                  </span>
+                  <span className="sr-only">Cancelar exclusão</span>
+                </button>
+              )}
+            </Tooltip>
+          </div>
+        ) : (
+          <Tooltip
+            className="tooltip-control tooltip-end"
+            content={tooltipCopy.deleteTask}
+          >
+            {(tooltipId) => (
+              <button
+                aria-describedby={tooltipId}
+                className="icon-button danger"
+                disabled={isPending}
+                onClick={() => onStartDelete(task.id)}
+                type="button"
+              >
+                {isPending ? (
+                  <Loader2 className="spin" size={18} aria-hidden="true" />
+                ) : (
+                  <Trash2 size={18} aria-hidden="true" />
+                )}
+                <span className="mobile-action-label" aria-hidden="true">
+                  Excluir
+                </span>
+                <span className="sr-only">Excluir tarefa</span>
+              </button>
+            )}
+          </Tooltip>
+        )}
+      </div>
+
+      <label className="mobile-status-control">
+        <span>Status</span>
+        <select
+          aria-label={`Alterar status de ${task.title}`}
+          disabled={isDisabled || isPending}
+          onChange={(event) =>
+            void onStatusChange(task, event.target.value as TaskStatus)
+          }
+          value={status}
+        >
+          {TASK_LANES.map((lane) => (
+            <option key={lane.status} value={lane.status}>
+              {lane.label}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      {subtasks.length > 0 ? (
+        <div
+          className="story-progress"
+          aria-label={`${completedSubtasks} de ${subtasks.length} subtarefas concluidas`}
+        >
+          <div className="story-progress-row">
+            <span>
+              <ListChecks size={14} aria-hidden="true" />
+              {completedSubtasks}/{subtasks.length} subtarefas
+            </span>
+            <strong>{subtaskProgress}%</strong>
+          </div>
+          <span className="story-progress-track">
+            <span style={{ width: `${subtaskProgress}%` }} />
+          </span>
+        </div>
+      ) : null}
+
+      <Tooltip
+        className="tooltip-fill task-card-preview-trigger"
+        content={getTaskPreviewContent(task, status, description, label)}
+      >
+        {(tooltipId) => (
+          <button
+            aria-describedby={tooltipId}
+            aria-label={`Editar detalhes de ${task.title}`}
+            className="task-content task-edit-button"
+            disabled={isPending}
+            onClick={() => onOpenDetails(task)}
+            type="button"
+          >
+            <span className="task-title">{task.title}</span>
+            <span className={`status-chip status-${status}`}>
+              {TASK_STATUS_LABELS[status]}
+            </span>
+            <span
+              className={
+                description ? 'task-description' : 'task-description empty'
+              }
+            >
+              <FileText size={14} aria-hidden="true" />
+              <span>{description || 'Sem descrição'}</span>
+            </span>
+            <span className="task-meta">
+              <span className={task.isAiGenerated ? 'badge ai' : 'badge'}>
+                {task.isAiGenerated ? 'Gerada por IA' : 'Manual'}
+              </span>
+              <span className={label ? 'label-pill' : 'label-pill empty'}>
+                <Tag size={13} aria-hidden="true" />
+                {label || 'Sem etiqueta'}
+              </span>
+              <span>
+                <Clock3 size={14} aria-hidden="true" />
+                {formatDate(task.createdAt)}
+              </span>
+            </span>
+            <span className="mobile-edit-callout">
+              <Pencil size={14} aria-hidden="true" />
+              Editar detalhes
+            </span>
+          </button>
+        )}
+      </Tooltip>
+
+      {subtasks.length > 0 ? (
+        <div className="subtask-panel">
+          <Tooltip
+            className="tooltip-fill"
+            content="Mostrar ou ocultar subtarefas desta historia."
+          >
+            {(tooltipId) => (
+              <button
+                aria-describedby={tooltipId}
+                aria-expanded={isExpanded}
+                className="subtask-toggle"
+                onClick={() => onToggleExpandedTask(task.id)}
+                type="button"
+              >
+                <span>Subtarefas</span>
+                <ChevronDown size={16} aria-hidden="true" />
+              </button>
+            )}
+          </Tooltip>
+
+          {isExpanded ? (
+            <ul
+              className="subtask-list"
+              aria-label={`Subtarefas de ${task.title}`}
+            >
+              {subtasks.map((subtask) => {
+                const subtaskStatus = getTaskStatus(subtask);
+                const subtaskLabel = subtask.label?.trim();
+
+                return (
+                  <li className="subtask-item" key={subtask.id}>
+                    <button
+                      className="subtask-check"
+                      disabled={pendingIds.has(subtask.id)}
+                      onClick={() => void onToggle(subtask)}
+                      type="button"
+                    >
+                      {subtaskStatus === DONE_STATUS ? (
+                        <CheckCircle2 size={18} aria-hidden="true" />
+                      ) : (
+                        <Circle size={18} aria-hidden="true" />
+                      )}
+                      <span className="sr-only">
+                        {subtaskStatus === DONE_STATUS
+                          ? 'Marcar subtarefa como pendente'
+                          : 'Marcar subtarefa como concluida'}
+                      </span>
+                    </button>
+                    <button
+                      className="subtask-open"
+                      disabled={pendingIds.has(subtask.id)}
+                      onClick={() => onOpenDetails(subtask)}
+                      type="button"
+                    >
+                      <span>{subtask.title}</span>
+                      <small>
+                        {subtaskLabel || TASK_STATUS_LABELS[subtaskStatus]}
+                      </small>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
+    </li>
   );
 }
 
@@ -1540,6 +2138,8 @@ function TaskFormModal({
   const titleId = useId();
   const descriptionId = useId();
   const labelId = useId();
+  const dialogRef = useRef<HTMLFormElement>(null);
+  const titleInputRef = useRef<HTMLInputElement>(null);
   const isCreateMode = mode === 'create';
   const dialogTitle = isCreateMode ? 'Captura rápida' : 'Editar tarefa';
   const eyebrow = isCreateMode ? 'Nova tarefa' : 'Detalhes da tarefa';
@@ -1550,16 +2150,62 @@ function TaskFormModal({
     : tooltipCopy.updateTaskDetails;
 
   useEffect(() => {
+    titleInputRef.current?.focus();
+  }, []);
+
+  useEffect(() => {
+    function getFocusableElements() {
+      return Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          [
+            'button:not([disabled])',
+            'input:not([disabled])',
+            'select:not([disabled])',
+            'textarea:not([disabled])',
+            '[href]',
+            '[tabindex]:not([tabindex="-1"])',
+          ].join(','),
+        ) ?? [],
+      ).filter((element) => element.offsetParent !== null);
+    }
+
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
+        event.preventDefault();
         onClose();
+        return;
+      }
+
+      if (event.key !== 'Tab') {
+        return;
+      }
+
+      const focusableElements = getFocusableElements();
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+        return;
+      }
+
+      if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown);
+    document.addEventListener('keydown', handleKeyDown);
 
     return () => {
-      window.removeEventListener('keydown', handleKeyDown);
+      document.removeEventListener('keydown', handleKeyDown);
     };
   }, [onClose]);
 
@@ -1577,6 +2223,7 @@ function TaskFormModal({
         aria-modal="true"
         className="task-modal"
         onSubmit={onSubmit}
+        ref={dialogRef}
         role="dialog"
       >
         <div className="modal-header">
@@ -1617,6 +2264,7 @@ function TaskFormModal({
                   maxLength={TASK_MAX_LENGTH}
                   onChange={(event) => onTitleChange(event.target.value)}
                   placeholder="Reservar voos"
+                  ref={titleInputRef}
                   type="text"
                   value={title}
                 />
