@@ -120,8 +120,9 @@ The backend will not call any external provider in mock mode.
 ## API
 
 - `GET /tasks`: list tasks
-- `POST /tasks`: create a manual task
+- `POST /tasks`: create a manual task with title, description and label
 - `PATCH /tasks/:id`: update title, description, label or completion status
+- `PATCH /tasks/:id/move`: move a task between kanban lanes and persist order
 - `PATCH /tasks/reorder`: persist the execution queue order
 - `DELETE /tasks/:id`: delete a task
 - `POST /tasks/ai-generate`: generate and persist AI-created tasks
