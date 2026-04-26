@@ -133,10 +133,10 @@ test('creates a detailed quick capture and moves it across kanban lanes', async 
     ).toContainText(title);
     await expectMetricsFromApi(page, request);
 
-    await dragTaskToLane(page, taskCard, 'Block');
-    await expect(page.getByRole('region', { name: 'Raia Block' })).toContainText(
-      title,
-    );
+    await dragTaskToLane(page, taskCard, 'Bloqueadas');
+    await expect(
+      page.getByRole('region', { name: 'Raia Bloqueadas' }),
+    ).toContainText(title);
     await expectMetricsFromApi(page, request);
 
     await dragTaskToLane(page, taskCard, 'Concluído');
@@ -153,6 +153,145 @@ test('creates a detailed quick capture and moves it across kanban lanes', async 
   } finally {
     await deleteTasksByTitle(request, title);
   }
+});
+
+test('uses a vertical status list on mobile without horizontal kanban scrolling', async ({
+  page,
+  request,
+}) => {
+  const stamp = Date.now();
+  const todoTitle = `E2E mobile todo ${stamp}`;
+  const doingTitle = `E2E mobile doing ${stamp}`;
+  const blockedTitle = `E2E mobile blocked ${stamp}`;
+  const doneTitle = `E2E mobile done ${stamp}`;
+  const titles = [todoTitle, doingTitle, blockedTitle, doneTitle];
+
+  for (const title of titles) {
+    await deleteTasksByTitle(request, title);
+  }
+
+  try {
+    const createdTasks: TaskResponse[] = [];
+
+    for (const title of titles) {
+      createdTasks.push(await createTaskByApi(request, title));
+    }
+
+    await moveTasksToFront(request, createdTasks.map((task) => task.id));
+    await moveTaskStatusByApi(request, createdTasks[1].id, 'doing');
+    await moveTaskStatusByApi(request, createdTasks[2].id, 'blocked');
+    await moveTaskStatusByApi(request, createdTasks[3].id, 'done');
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    await waitForAppReady(page);
+
+    await expect(page.locator('.mobile-status-tabs')).toBeVisible();
+    await expect(page.locator('.mobile-task-list')).toBeVisible();
+    await expect(page.locator('.desktop-task-surface')).toBeHidden();
+    await expect(page.locator('.kanban-board')).toBeHidden();
+
+    for (const title of titles) {
+      await expect(mobileTaskCard(page, title)).toBeVisible();
+    }
+
+    const firstCardWidth = await mobileTaskCard(page, todoTitle).evaluate(
+      (element) => {
+        const card = element.getBoundingClientRect();
+        const list = element.closest('.mobile-task-list')!.getBoundingClientRect();
+
+        return {
+          card: card.width,
+          list: list.width,
+        };
+      },
+    );
+
+    expect(firstCardWidth.card).toBeGreaterThan(300);
+    expect(Math.abs(firstCardWidth.card - firstCardWidth.list)).toBeLessThanOrEqual(
+      2,
+    );
+
+    const pageFitsViewport = await page.evaluate(
+      () => document.documentElement.scrollWidth <= document.documentElement.clientWidth + 1,
+    );
+
+    expect(pageFitsViewport).toBe(true);
+
+    await page.getByRole('button', { name: /Bloqueadas/ }).click();
+
+    await expect(mobileTaskCard(page, blockedTitle)).toBeVisible();
+    await expect(mobileTaskCard(page, todoTitle)).toHaveCount(0);
+    await expect(mobileTaskCard(page, doingTitle)).toHaveCount(0);
+    await expect(mobileTaskCard(page, doneTitle)).toHaveCount(0);
+  } finally {
+    for (const title of titles) {
+      await deleteTasksByTitle(request, title);
+    }
+  }
+});
+
+test('changes and persists task status from the mobile card control', async ({
+  page,
+  request,
+}) => {
+  const title = `E2E mobile status ${Date.now()}`;
+  await deleteTasksByTitle(request, title);
+
+  try {
+    const task = await createTaskByApi(request, title);
+    await moveTasksToFront(request, [task.id]);
+
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto('/');
+    await waitForAppReady(page);
+
+    await page.getByLabel(`Alterar status de ${title}`).selectOption('blocked');
+    await expect(page.locator('.toast-viewport')).toContainText(
+      'Status atualizado.',
+    );
+
+    await page.getByRole('button', { name: /Bloqueadas/ }).click();
+    await expect(mobileTaskCard(page, title)).toBeVisible();
+
+    await page.reload();
+    await waitForAppReady(page);
+    await page.getByRole('button', { name: /Bloqueadas/ }).click();
+    await expect(mobileTaskCard(page, title)).toBeVisible();
+
+    const response = await request.get(`${apiUrl}/tasks`);
+    expect(response.ok()).toBe(true);
+    const tasks = (await response.json()) as TaskResponse[];
+    expect(tasks.find((item) => item.id === task.id)?.status).toBe('blocked');
+  } finally {
+    await deleteTasksByTitle(request, title);
+  }
+});
+
+test('focuses, traps and restores focus for the task modal', async ({ page }) => {
+  await page.goto('/');
+  await waitForAppReady(page);
+
+  const opener = page.getByRole('button', { name: 'Abrir captura rápida' });
+  await opener.click();
+
+  const dialog = page.getByRole('dialog', { name: 'Captura rápida' });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByLabel('Título')).toBeFocused();
+
+  const closeButton = dialog.getByRole('button', { name: 'Fechar detalhes' });
+  const cancelButton = dialog.getByRole('button', { name: 'Cancelar' });
+
+  await closeButton.focus();
+  await page.keyboard.press('Shift+Tab');
+  await expect(cancelButton).toBeFocused();
+
+  await page.keyboard.press('Tab');
+  await expect(closeButton).toBeFocused();
+
+  await page.keyboard.press('Escape');
+  await expect(dialog).toHaveCount(0);
+  await expect(opener).toBeFocused();
 });
 
 test('persists card order after drag and reload', async ({ page, request }) => {
@@ -326,6 +465,28 @@ async function createTaskByApi(
   expect(response.ok()).toBe(true);
 
   return (await response.json()) as TaskResponse;
+}
+
+async function moveTaskStatusByApi(
+  request: APIRequestContext,
+  taskId: string,
+  status: string,
+): Promise<void> {
+  const response = await request.get(`${apiUrl}/tasks`);
+
+  expect(response.ok()).toBe(true);
+
+  const tasks = (await response.json()) as TaskResponse[];
+  const orderedIds = tasks.filter((task) => !task.parentId).map((task) => task.id);
+  const moveResponse = await request.patch(`${apiUrl}/tasks/${taskId}/move`, {
+    data: { orderedIds, status },
+  });
+
+  expect(moveResponse.ok()).toBe(true);
+}
+
+function mobileTaskCard(page: Page, title: string): Locator {
+  return page.locator('.mobile-task-surface .task-card').filter({ hasText: title });
 }
 
 async function moveTasksToFront(
