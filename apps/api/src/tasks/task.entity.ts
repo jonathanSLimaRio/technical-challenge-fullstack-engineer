@@ -21,6 +21,12 @@ export class Task {
   @Column({ type: 'varchar', length: 40, nullable: true })
   label!: string | null;
 
+  @Column({ name: 'parent_id', type: 'varchar', length: 36, nullable: true })
+  parentId!: string | null;
+
+  @Column({ name: 'root_id', type: 'varchar', length: 36, nullable: true })
+  rootId!: string | null;
+
   @Column({ type: 'integer', default: 0 })
   position!: number;
 

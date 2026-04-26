@@ -10,7 +10,9 @@ type TaskResponse = {
   isAiGenerated: boolean;
   isCompleted: boolean;
   label: string | null;
+  parentId: string | null;
   position: number;
+  rootId: string | null;
   status: string;
   title: string;
   updatedAt: string;
@@ -55,6 +57,8 @@ describe('TasksController HTTP', () => {
       isAiGenerated: false,
       isCompleted: false,
       label: 'QA Review',
+      parentId: null,
+      rootId: null,
       status: 'todo',
       title: 'Write focused tests',
     });
@@ -217,22 +221,32 @@ describe('TasksController HTTP', () => {
     const payload = (await response.json()) as GenerateTasksResponse;
 
     expect(response.status).toBe(HttpStatus.CREATED);
-    expect(payload.tasks).toHaveLength(6);
+    expect(payload.tasks).toHaveLength(7);
     expect(payload.tasks.every((task) => task.isAiGenerated)).toBe(true);
     expect(
       payload.tasks.every((task) => task.description && task.label),
     ).toBe(true);
     expect(payload.tasks[0]).toMatchObject({
       description:
+        'Plano gerado para organizar o objetivo em uma historia central e proximos passos claros.',
+      label: 'Plano',
+      parentId: null,
+      title: 'Launch a deterministic review plan',
+    });
+    expect(payload.tasks[0].rootId).toBe(payload.tasks[0].id);
+    expect(payload.tasks[1]).toMatchObject({
+      description:
         'Definir o resultado esperado, os criterios de pronto e o que ficara fora deste plano.',
       label: 'Planejamento',
+      parentId: payload.tasks[0].id,
+      rootId: payload.tasks[0].id,
       title:
         'Esclarecer o resultado desejado para Launch a deterministic review plan',
     });
 
     const persistedTasks = await readJson<TaskResponse[]>(`${baseUrl}/tasks`);
 
-    expect(persistedTasks).toHaveLength(6);
+    expect(persistedTasks).toHaveLength(7);
     expect(
       persistedTasks.every((task) => task.isAiGenerated && task.description && task.label),
     ).toBe(true);

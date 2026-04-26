@@ -20,6 +20,12 @@ export class TaskResponseDto {
   @ApiProperty({ nullable: true })
   label!: string | null;
 
+  @ApiProperty({ nullable: true })
+  parentId!: string | null;
+
+  @ApiProperty({ nullable: true })
+  rootId!: string | null;
+
   @ApiProperty()
   position!: number;
 
@@ -46,6 +52,8 @@ export class TaskResponseDto {
       title: task.title,
       description: task.description,
       label: task.label,
+      parentId: task.parentId,
+      rootId: task.rootId,
       position: task.position,
       status,
       isCompleted: isCompletedStatus(status),

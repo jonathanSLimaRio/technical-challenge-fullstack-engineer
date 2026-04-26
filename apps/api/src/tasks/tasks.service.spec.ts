@@ -35,8 +35,8 @@ function createHarness(): Harness {
     return persisted;
   };
 
-  const managerSave = jest.fn(async (_entity: typeof Task, entities: Task[]) =>
-    entities.map(persistTask),
+  const managerSave = jest.fn(async (_entity: typeof Task, input: Task | Task[]) =>
+    Array.isArray(input) ? input.map(persistTask) : persistTask(input),
   );
 
   const repository = {
@@ -45,6 +45,8 @@ function createHarness(): Harness {
       title: '',
       description: null,
       label: null,
+      parentId: null,
+      rootId: null,
       position: 0,
       status: 'todo',
       isCompleted: false,
@@ -53,15 +55,20 @@ function createHarness(): Harness {
       updatedAt: undefined,
       ...input,
     })),
-    delete: jest.fn(async (id: string) => {
-      const index = tasks.findIndex((task) => task.id === id);
+    delete: jest.fn(async (idOrIds: string | string[]) => {
+      const ids = Array.isArray(idOrIds) ? idOrIds : [idOrIds];
+      let affected = 0;
 
-      if (index === -1) {
-        return { affected: 0, raw: undefined };
+      for (const id of ids) {
+        const index = tasks.findIndex((task) => task.id === id);
+
+        if (index !== -1) {
+          tasks.splice(index, 1);
+          affected += 1;
+        }
       }
 
-      tasks.splice(index, 1);
-      return { affected: 1, raw: undefined };
+      return { affected, raw: undefined };
     }),
     find: jest.fn(async () =>
       [...tasks].sort((left, right) => {
@@ -118,6 +125,8 @@ describe(TasksService.name, () => {
     expect(task.title).toBe('Book flights');
     expect(task.description).toBeNull();
     expect(task.label).toBeNull();
+    expect(task.parentId).toBeNull();
+    expect(task.rootId).toBeNull();
     expect(task.position).toBe(0);
     expect(task.status).toBe('todo');
     expect(task.isCompleted).toBe(false);
@@ -233,40 +242,73 @@ describe(TasksService.name, () => {
     await expect(service.remove(task.id)).rejects.toBeInstanceOf(NotFoundException);
   });
 
-  it('persists AI-generated tasks inside a transaction', async () => {
+  it('persists an AI-generated story and subtasks inside a transaction', async () => {
     const { aiTaskGenerator, repository, service, tasksEventsGateway } =
       createHarness();
-    aiTaskGenerator.generateTasks.mockResolvedValue([
-      {
-        description: 'Confirm the best window before booking anything.',
-        label: 'Planning',
-        title: 'Choose destination dates',
+    aiTaskGenerator.generateTasks.mockResolvedValue({
+      story: {
+        description: 'Organize the trip from planning to departure.',
+        label: 'Travel',
+        title: 'Plan a trip',
       },
-      {
-        description: '  Compare nonstop and refundable routes.  ',
-        label: '  Flights   ',
-        title: 'Compare flight options',
-      },
-    ]);
+      subtasks: [
+        {
+          description: 'Confirm the best window before booking anything.',
+          label: 'Planning',
+          title: 'Choose destination dates',
+        },
+        {
+          description: '  Compare nonstop and refundable routes.  ',
+          label: '  Flights   ',
+          title: 'Compare flight options',
+        },
+      ],
+    });
 
     const generatedTasks = await service.generateFromGoal({
       goal: 'Plan a trip',
     });
 
-    expect(generatedTasks).toHaveLength(2);
+    expect(generatedTasks).toHaveLength(3);
     expect(generatedTasks.every((task) => task.isAiGenerated)).toBe(true);
     expect(generatedTasks[0]).toMatchObject({
+      description: 'Organize the trip from planning to departure.',
+      label: 'Travel',
+      parentId: null,
+      title: 'Plan a trip',
+    });
+    expect(generatedTasks[0].rootId).toBe(generatedTasks[0].id);
+    expect(generatedTasks[1]).toMatchObject({
       description: 'Confirm the best window before booking anything.',
       label: 'Planning',
+      parentId: generatedTasks[0].id,
+      rootId: generatedTasks[0].id,
       title: 'Choose destination dates',
     });
-    expect(generatedTasks[1]).toMatchObject({
+    expect(generatedTasks[2]).toMatchObject({
       description: 'Compare nonstop and refundable routes.',
       label: 'Flights',
+      parentId: generatedTasks[0].id,
+      rootId: generatedTasks[0].id,
       title: 'Compare flight options',
     });
     expect(repository.manager.transaction).toHaveBeenCalledTimes(1);
     expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('generated');
+  });
+
+  it('deletes descendants when deleting a parent task', async () => {
+    const { service, tasks } = createHarness();
+    const parent = await service.create({ title: 'Parent task' });
+    const child = await service.create({ title: 'Child task' });
+    child.parentId = parent.id;
+    child.rootId = parent.id;
+    const grandchild = await service.create({ title: 'Nested task' });
+    grandchild.parentId = child.id;
+    grandchild.rootId = parent.id;
+
+    await service.remove(parent.id);
+
+    expect(tasks).toHaveLength(0);
   });
 
   it('does not persist tasks when AI generation fails', async () => {
