@@ -25,25 +25,30 @@ test('generates structured AI tasks from the UI without asking for the provider 
     await waitForAppReady(page);
     await expect(page.getByLabel('Chave da API do provedor')).toHaveCount(0);
     await page.getByLabel('Objetivo').fill(goal);
-    await page.getByRole('button', { name: 'Gerar tarefas' }).click();
+    await page.getByRole('button', { name: 'Gerar plano' }).click();
 
     await expect(page.locator('.toast-viewport')).toContainText(
-      '6 tarefas da IA criadas.',
+      'Plano criado com 1 historia e 6 subtarefas.',
     );
 
-    const uniqueGeneratedTask = page
+    const generatedStory = page
       .locator('.task-card')
-      .filter({ hasText: `Esclarecer o resultado desejado para ${goal}` });
+      .filter({ hasText: goal });
 
-    await expect(uniqueGeneratedTask).toBeVisible();
-    await expect(uniqueGeneratedTask).toContainText(
-      'Definir o resultado esperado, os criterios de pronto',
+    await expect(generatedStory).toBeVisible();
+    await expect(generatedStory).toContainText('0/6 subtarefas');
+    await generatedStory.getByRole('button', { name: 'Subtarefas' }).click();
+    await expect(generatedStory).toContainText(
+      `Esclarecer o resultado desejado para ${goal}`,
     );
-    await expect(uniqueGeneratedTask).toContainText('Planejamento');
+    await expect(generatedStory).toContainText('Planejamento');
+
+    await generatedStory.locator('.subtask-check').first().click();
+    await expect(generatedStory).toContainText('1/6 subtarefas');
 
     await page.getByRole('button', { name: /^IA/ }).click();
-    await expect(uniqueGeneratedTask).toBeVisible();
-    await expect(uniqueGeneratedTask).toContainText('Gerada por IA');
+    await expect(generatedStory).toBeVisible();
+    await expect(generatedStory).toContainText('Gerada por IA');
 
     const browserStorage = await page.evaluate(() => ({
       localStorage: Object.entries(localStorage),

@@ -21,12 +21,14 @@ import { CSS } from '@dnd-kit/utilities';
 import {
   AlertCircle,
   BarChart3,
+  ChevronDown,
   CheckCircle2,
   Circle,
   Clock3,
   FileText,
   GripVertical,
   LayoutList,
+  ListChecks,
   Loader2,
   Moon,
   Plus,
@@ -84,7 +86,6 @@ const TASK_STATUS_LABELS: Record<TaskStatus, string> = TASK_LANES.reduce(
 const TASK_STATUS_SET = new Set<string>(TASK_STATUSES);
 
 const tooltipCopy = {
-  addTask: 'Salvar esta tarefa manual na fila de execução.',
   aiFilter: 'Mostrar tarefas criadas pela IA.',
   cancelDelete: 'Manter esta tarefa e fechar a confirmação.',
   completionMetric: 'Percentual de tarefas marcadas como concluídas.',
@@ -94,7 +95,6 @@ const tooltipCopy = {
   doneFilter: 'Mostrar apenas tarefas concluídas.',
   doneMetric: 'Tarefas já marcadas como concluídas.',
   dragTask: 'Arrastar para mover entre raias ou reordenar a fila.',
-  editTask: 'Abrir detalhes para editar descrição e etiqueta.',
   generateTasks:
     'Criar e salvar tarefas sugeridas pela IA a partir deste objetivo.',
   goal: 'Descreva um resultado concreto. A IA transforma isso em tarefas salvas.',
@@ -149,20 +149,93 @@ function getErrorMessage(error: unknown): string {
   return 'Algo deu errado. Tente novamente.';
 }
 
-function getFilteredTasks(tasks: Task[], filter: TaskFilter): Task[] {
+function getRootTasks(tasks: Task[]): Task[] {
+  return tasks.filter((task) => !task.parentId);
+}
+
+function getTasksByParent(tasks: Task[]): Map<string, Task[]> {
+  const tasksByParent = new Map<string, Task[]>();
+
+  for (const task of tasks) {
+    if (!task.parentId) {
+      continue;
+    }
+
+    const siblings = tasksByParent.get(task.parentId) ?? [];
+    siblings.push(task);
+    tasksByParent.set(task.parentId, siblings);
+  }
+
+  for (const siblings of tasksByParent.values()) {
+    siblings.sort((left, right) => {
+      if (left.position !== right.position) {
+        return left.position - right.position;
+      }
+
+      return new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime();
+    });
+  }
+
+  return tasksByParent;
+}
+
+function isStoryComplete(task: Task, subtasks: Task[]): boolean {
+  if (subtasks.length === 0) {
+    return getTaskStatus(task) === DONE_STATUS;
+  }
+
+  return subtasks.every((subtask) => getTaskStatus(subtask) === DONE_STATUS);
+}
+
+function getFilteredRootTasks(
+  rootTasks: Task[],
+  tasksByParent: Map<string, Task[]>,
+  filter: TaskFilter,
+): Task[] {
+  if (filter === 'ai') {
+    return rootTasks.filter((task) => {
+      const subtasks = tasksByParent.get(task.id) ?? [];
+      return task.isAiGenerated || subtasks.some((subtask) => subtask.isAiGenerated);
+    });
+  }
+
   if (filter === 'pending') {
-    return tasks.filter((task) => getTaskStatus(task) !== DONE_STATUS);
+    return rootTasks.filter(
+      (task) => !isStoryComplete(task, tasksByParent.get(task.id) ?? []),
+    );
   }
 
   if (filter === 'done') {
-    return tasks.filter((task) => getTaskStatus(task) === DONE_STATUS);
+    return rootTasks.filter((task) =>
+      isStoryComplete(task, tasksByParent.get(task.id) ?? []),
+    );
   }
 
-  if (filter === 'ai') {
-    return tasks.filter((task) => task.isAiGenerated);
+  return rootTasks;
+}
+
+function getDescendantIds(id: string, tasks: Task[]): Set<string> {
+  const ids = new Set<string>([id]);
+  let changed = true;
+
+  while (changed) {
+    changed = false;
+
+    for (const task of tasks) {
+      if (task.parentId && ids.has(task.parentId) && !ids.has(task.id)) {
+        ids.add(task.id);
+        changed = true;
+      }
+    }
   }
 
-  return tasks;
+  return ids;
+}
+
+function mergeRootTasks(tasks: Task[], rootTasks: Task[]): Task[] {
+  const rootIds = new Set(rootTasks.map((task) => task.id));
+
+  return [...rootTasks, ...tasks.filter((task) => !rootIds.has(task.id))];
 }
 
 function getVisibleLanes(filter: TaskFilter): TaskLane[] {
@@ -316,6 +389,9 @@ export function SmartTodoApp() {
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
     null,
   );
+  const [expandedTaskIds, setExpandedTaskIds] = useState<Set<string>>(
+    () => new Set(),
+  );
   const [editingTask, setEditingTask] = useState<Task | null>(null);
   const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
@@ -353,13 +429,15 @@ export function SmartTodoApp() {
     };
   }, [tasks]);
 
-  const filteredTasks = useMemo(
-    () => getFilteredTasks(tasks, activeFilter),
-    [activeFilter, tasks],
+  const rootTasks = useMemo(() => getRootTasks(tasks), [tasks]);
+  const tasksByParent = useMemo(() => getTasksByParent(tasks), [tasks]);
+  const filteredRootTasks = useMemo(
+    () => getFilteredRootTasks(rootTasks, tasksByParent, activeFilter),
+    [activeFilter, rootTasks, tasksByParent],
   );
   const filteredTasksByStatus = useMemo(
-    () => getTasksByStatus(filteredTasks),
-    [filteredTasks],
+    () => getTasksByStatus(filteredRootTasks),
+    [filteredRootTasks],
   );
   const visibleLanes = useMemo(
     () => getVisibleLanes(activeFilter),
@@ -480,9 +558,11 @@ export function SmartTodoApp() {
       await mutate((currentTasks = []) => [...generatedTasks, ...currentTasks], {
         revalidate: false,
       });
+      const storyCount = generatedTasks.filter((task) => !task.parentId).length;
+      const subtaskCount = generatedTasks.length - storyCount;
       showToast({
         type: 'success',
-        message: `${generatedTasks.length} tarefas da IA criadas.`,
+        message: `Plano criado com ${storyCount} historia e ${subtaskCount} subtarefas.`,
       });
     } catch (requestError) {
       showToast({ type: 'error', message: getErrorMessage(requestError) });
@@ -527,10 +607,11 @@ export function SmartTodoApp() {
 
   async function handleDeleteTask(task: Task) {
     const previousTasks = tasks;
+    const idsToDelete = getDescendantIds(task.id, tasks);
     setPending(task.id, true);
 
     await mutate(
-      tasks.filter((item) => item.id !== task.id),
+      tasks.filter((item) => !idsToDelete.has(item.id)),
       { revalidate: false },
     );
 
@@ -623,20 +704,26 @@ export function SmartTodoApp() {
 
     const activeId = String(active.id);
     const overId = String(over.id);
-    const activeTask = tasks.find((task) => task.id === activeId);
-    const targetStatus = getDragTargetStatus(tasks, overId);
+    const activeTask = rootTasks.find((task) => task.id === activeId);
+    const targetStatus = getDragTargetStatus(rootTasks, overId);
 
     if (!activeTask || !targetStatus) {
       return;
     }
 
     const previousTasks = tasks;
-    const nextTasks = getMovedTasks(tasks, activeId, overId, targetStatus);
-    const orderedIds = nextTasks.map((task) => task.id);
+    const nextRootTasks = getMovedTasks(
+      rootTasks,
+      activeId,
+      overId,
+      targetStatus,
+    );
+    const nextTasks = mergeRootTasks(tasks, nextRootTasks);
+    const orderedIds = nextRootTasks.map((task) => task.id);
 
     if (
       getTaskStatus(activeTask) === targetStatus &&
-      orderedIds.every((id, index) => id === tasks[index]?.id)
+      orderedIds.every((id, index) => id === rootTasks[index]?.id)
     ) {
       return;
     }
@@ -661,6 +748,20 @@ export function SmartTodoApp() {
 
   function handleStartDelete(taskId: string) {
     setConfirmingDeleteId(taskId);
+  }
+
+  function handleToggleExpandedTask(taskId: string) {
+    setExpandedTaskIds((current) => {
+      const next = new Set(current);
+
+      if (next.has(taskId)) {
+        next.delete(taskId);
+      } else {
+        next.add(taskId);
+      }
+
+      return next;
+    });
   }
 
   function setPending(id: string, isPending: boolean) {
@@ -754,7 +855,7 @@ export function SmartTodoApp() {
                     ) : (
                       <Sparkles size={18} aria-hidden="true" />
                     )}
-                    {isGenerating ? 'Gerando plano...' : 'Gerar tarefas'}
+                    {isGenerating ? 'Gerando plano...' : 'Gerar plano'}
                   </button>
                 )}
               </Tooltip>
@@ -929,8 +1030,8 @@ export function SmartTodoApp() {
 
               {!isLoading &&
               !error &&
-              tasks.length > 0 &&
-              filteredTasks.length === 0 ? (
+              rootTasks.length > 0 &&
+              filteredRootTasks.length === 0 ? (
                 <EmptyState
                   actionIcon={<LayoutList size={18} aria-hidden="true" />}
                   actionLabel="Mostrar todas as tarefas"
@@ -941,7 +1042,7 @@ export function SmartTodoApp() {
                 />
               ) : null}
 
-              {!isLoading && filteredTasks.length > 0 ? (
+              {!isLoading && filteredRootTasks.length > 0 ? (
                 <DndContext
                   collisionDetection={closestCenter}
                   onDragEnd={(event) => void handleDragEnd(event)}
@@ -955,6 +1056,7 @@ export function SmartTodoApp() {
                     {visibleLanes.map((lane) => (
                       <KanbanLane
                         confirmingDeleteId={confirmingDeleteId}
+                        expandedTaskIds={expandedTaskIds}
                         isDisabled={isReordering}
                         key={lane.status}
                         lane={lane}
@@ -962,8 +1064,10 @@ export function SmartTodoApp() {
                         onDelete={handleDeleteTask}
                         onOpenDetails={handleOpenTaskDetails}
                         onStartDelete={handleStartDelete}
+                        onToggleExpandedTask={handleToggleExpandedTask}
                         onToggle={handleToggleTask}
                         pendingIds={pendingIds}
+                        tasksByParent={tasksByParent}
                         tasks={filteredTasksByStatus[lane.status]}
                       />
                     ))}
@@ -999,8 +1103,12 @@ export function SmartTodoApp() {
           onClose={handleCloseTaskDetails}
           onDescriptionChange={setEditDescription}
           onLabelChange={setEditLabel}
+          onOpenSubtask={handleOpenTaskDetails}
           onSubmit={handleSaveTaskDetails}
+          onToggleSubtask={handleToggleTask}
           onTitleChange={setEditTitle}
+          pendingIds={pendingIds}
+          subtasks={tasksByParent.get(editingTask.id) ?? []}
           title={editTitle}
         />
       ) : null}
@@ -1012,25 +1120,31 @@ export function SmartTodoApp() {
 
 function KanbanLane({
   confirmingDeleteId,
+  expandedTaskIds,
   isDisabled,
   lane,
   onCancelDelete,
   onDelete,
   onOpenDetails,
   onStartDelete,
+  onToggleExpandedTask,
   onToggle,
   pendingIds,
+  tasksByParent,
   tasks,
 }: {
   confirmingDeleteId: string | null;
+  expandedTaskIds: Set<string>;
   isDisabled: boolean;
   lane: TaskLane;
   onCancelDelete: () => void;
   onDelete: (task: Task) => void | Promise<void>;
   onOpenDetails: (task: Task) => void;
   onStartDelete: (taskId: string) => void;
+  onToggleExpandedTask: (taskId: string) => void;
   onToggle: (task: Task) => void | Promise<void>;
   pendingIds: Set<string>;
+  tasksByParent: Map<string, Task[]>;
   tasks: Task[];
 }) {
   const { isOver, setNodeRef } = useDroppable({
@@ -1070,8 +1184,12 @@ function KanbanLane({
               onDelete={onDelete}
               onOpenDetails={onOpenDetails}
               onStartDelete={onStartDelete}
+              onToggleExpandedTask={onToggleExpandedTask}
               onToggle={onToggle}
+              pendingIds={pendingIds}
               task={task}
+              subtasks={tasksByParent.get(task.id) ?? []}
+              isExpanded={expandedTaskIds.has(task.id)}
             />
           ))}
         </ul>
@@ -1083,22 +1201,30 @@ function KanbanLane({
 function SortableTaskCard({
   isConfirmingDelete,
   isDisabled,
+  isExpanded,
   isPending,
   onCancelDelete,
   onDelete,
   onOpenDetails,
   onStartDelete,
+  onToggleExpandedTask,
   onToggle,
+  pendingIds,
+  subtasks,
   task,
 }: {
   isConfirmingDelete: boolean;
   isDisabled: boolean;
+  isExpanded: boolean;
   isPending: boolean;
   onCancelDelete: () => void;
   onDelete: (task: Task) => void | Promise<void>;
   onOpenDetails: (task: Task) => void;
   onStartDelete: (taskId: string) => void;
+  onToggleExpandedTask: (taskId: string) => void;
   onToggle: (task: Task) => void | Promise<void>;
+  pendingIds: Set<string>;
+  subtasks: Task[];
   task: Task;
 }) {
   const status = getTaskStatus(task);
@@ -1116,6 +1242,11 @@ function SortableTaskCard({
   });
   const description = task.description?.trim();
   const label = task.label?.trim();
+  const completedSubtasks = subtasks.filter(
+    (subtask) => getTaskStatus(subtask) === DONE_STATUS,
+  ).length;
+  const subtaskProgress =
+    subtasks.length > 0 ? Math.round((completedSubtasks / subtasks.length) * 100) : 0;
   const style: CSSProperties = {
     transform: CSS.Transform.toString(transform),
     transition,
@@ -1123,6 +1254,8 @@ function SortableTaskCard({
   const className = [
     'task-card',
     `status-${status}`,
+    subtasks.length > 0 ? 'has-subtasks' : '',
+    isExpanded ? 'expanded' : '',
     status === DONE_STATUS ? 'done' : '',
     isDragging ? 'dragging' : '',
   ]
@@ -1250,6 +1383,21 @@ function SortableTaskCard({
         )}
       </div>
 
+      {subtasks.length > 0 ? (
+        <div className="story-progress" aria-label={`${completedSubtasks} de ${subtasks.length} subtarefas concluidas`}>
+          <div className="story-progress-row">
+            <span>
+              <ListChecks size={14} aria-hidden="true" />
+              {completedSubtasks}/{subtasks.length} subtarefas
+            </span>
+            <strong>{subtaskProgress}%</strong>
+          </div>
+          <span className="story-progress-track">
+            <span style={{ width: `${subtaskProgress}%` }} />
+          </span>
+        </div>
+      ) : null}
+
       <Tooltip
         className="tooltip-fill task-card-preview-trigger"
         content={getTaskPreviewContent(task, status, description, label)}
@@ -1291,6 +1439,68 @@ function SortableTaskCard({
           </button>
         )}
       </Tooltip>
+
+      {subtasks.length > 0 ? (
+        <div className="subtask-panel">
+          <Tooltip
+            className="tooltip-fill"
+            content="Mostrar ou ocultar subtarefas desta historia."
+          >
+            {(tooltipId) => (
+              <button
+                aria-describedby={tooltipId}
+                aria-expanded={isExpanded}
+                className="subtask-toggle"
+                onClick={() => onToggleExpandedTask(task.id)}
+                type="button"
+              >
+                <span>Subtarefas</span>
+                <ChevronDown size={16} aria-hidden="true" />
+              </button>
+            )}
+          </Tooltip>
+
+          {isExpanded ? (
+            <ul className="subtask-list" aria-label={`Subtarefas de ${task.title}`}>
+              {subtasks.map((subtask) => {
+                const subtaskStatus = getTaskStatus(subtask);
+                const subtaskLabel = subtask.label?.trim();
+
+                return (
+                  <li className="subtask-item" key={subtask.id}>
+                    <button
+                      className="subtask-check"
+                      disabled={pendingIds.has(subtask.id)}
+                      onClick={() => void onToggle(subtask)}
+                      type="button"
+                    >
+                      {subtaskStatus === DONE_STATUS ? (
+                        <CheckCircle2 size={18} aria-hidden="true" />
+                      ) : (
+                        <Circle size={18} aria-hidden="true" />
+                      )}
+                      <span className="sr-only">
+                        {subtaskStatus === DONE_STATUS
+                          ? 'Marcar subtarefa como pendente'
+                          : 'Marcar subtarefa como concluida'}
+                      </span>
+                    </button>
+                    <button
+                      className="subtask-open"
+                      disabled={pendingIds.has(subtask.id)}
+                      onClick={() => onOpenDetails(subtask)}
+                      type="button"
+                    >
+                      <span>{subtask.title}</span>
+                      <small>{subtaskLabel || TASK_STATUS_LABELS[subtaskStatus]}</small>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          ) : null}
+        </div>
+      ) : null}
     </li>
   );
 }
@@ -1303,8 +1513,12 @@ function TaskFormModal({
   onClose,
   onDescriptionChange,
   onLabelChange,
+  onOpenSubtask,
   onSubmit,
+  onToggleSubtask,
   onTitleChange,
+  pendingIds = new Set(),
+  subtasks = [],
   title,
 }: {
   description: string;
@@ -1314,8 +1528,12 @@ function TaskFormModal({
   onClose: () => void;
   onDescriptionChange: (value: string) => void;
   onLabelChange: (value: string) => void;
+  onOpenSubtask?: (task: Task) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
+  onToggleSubtask?: (task: Task) => void | Promise<void>;
   onTitleChange: (value: string) => void;
+  pendingIds?: Set<string>;
+  subtasks?: Task[];
   title: string;
 }) {
   const dialogTitleId = useId();
@@ -1436,6 +1654,59 @@ function TaskFormModal({
             />
           </div>
         </div>
+
+        {subtasks.length > 0 ? (
+          <section className="modal-subtasks" aria-label="Subtarefas">
+            <div className="modal-subtasks-header">
+              <span>
+                <ListChecks size={16} aria-hidden="true" />
+                Subtarefas
+              </span>
+              <strong>
+                {
+                  subtasks.filter(
+                    (subtask) => getTaskStatus(subtask) === DONE_STATUS,
+                  ).length
+                }/{subtasks.length}
+              </strong>
+            </div>
+            <ul className="modal-subtask-list">
+              {subtasks.map((subtask) => {
+                const subtaskStatus = getTaskStatus(subtask);
+                const isSubtaskPending = pendingIds.has(subtask.id);
+
+                return (
+                  <li key={subtask.id}>
+                    <button
+                      className="subtask-check"
+                      disabled={isSubtaskPending || !onToggleSubtask}
+                      onClick={() => void onToggleSubtask?.(subtask)}
+                      type="button"
+                    >
+                      {subtaskStatus === DONE_STATUS ? (
+                        <CheckCircle2 size={18} aria-hidden="true" />
+                      ) : (
+                        <Circle size={18} aria-hidden="true" />
+                      )}
+                      <span className="sr-only">
+                        Alternar status da subtarefa
+                      </span>
+                    </button>
+                    <button
+                      className="modal-subtask-open"
+                      disabled={isSubtaskPending || !onOpenSubtask}
+                      onClick={() => onOpenSubtask?.(subtask)}
+                      type="button"
+                    >
+                      <span>{subtask.title}</span>
+                      <small>{TASK_STATUS_LABELS[subtaskStatus]}</small>
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          </section>
+        ) : null}
 
         <div className="modal-actions">
           <button

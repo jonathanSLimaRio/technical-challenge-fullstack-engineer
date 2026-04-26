@@ -338,9 +338,10 @@ async function moveTasksToFront(
 
   const tasks = (await response.json()) as TaskResponse[];
   const taskIdSet = new Set(taskIds);
+  const rootTasks = tasks.filter((task) => !task.parentId);
   const orderedIds = [
     ...taskIds,
-    ...tasks.filter((task) => !taskIdSet.has(task.id)).map((task) => task.id),
+    ...rootTasks.filter((task) => !taskIdSet.has(task.id)).map((task) => task.id),
   ];
   const reorderResponse = await request.patch(`${apiUrl}/tasks/reorder`, {
     data: { orderedIds },

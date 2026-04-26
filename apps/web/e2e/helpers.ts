@@ -10,7 +10,9 @@ export type TaskResponse = {
   isAiGenerated: boolean;
   isCompleted?: boolean;
   label?: string | null;
+  parentId?: string | null;
   position?: number;
+  rootId?: string | null;
   status?: string;
   title: string;
 };

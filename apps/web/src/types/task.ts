@@ -7,6 +7,8 @@ export type Task = {
   title: string;
   description: string | null;
   label: string | null;
+  parentId: string | null;
+  rootId: string | null;
   position: number;
   status: TaskStatus;
   isCompleted: boolean;
