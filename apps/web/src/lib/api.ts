@@ -1,4 +1,4 @@
-import type { GenerateTasksResponse, Task } from '../types/task';
+import type { GenerateTasksResponse, Task, TaskStatus } from '../types/task';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -75,10 +75,18 @@ export function getApiOrigin(): string {
   }
 }
 
-export function createTask(title: string): Promise<Task> {
+type CreateTaskPayload = {
+  description?: string;
+  label?: string;
+  title: string;
+};
+
+export function createTask(payload: CreateTaskPayload | string): Promise<Task> {
+  const body = typeof payload === 'string' ? { title: payload } : payload;
+
   return request<Task>('/tasks', {
     method: 'POST',
-    body: JSON.stringify({ title }),
+    body: JSON.stringify(body),
   });
 }
 
@@ -88,10 +96,24 @@ export function updateTask(
     description?: string;
     isCompleted?: boolean;
     label?: string;
+    status?: TaskStatus;
     title?: string;
   },
 ): Promise<Task> {
   return request<Task>(`/tasks/${encodeURIComponent(id)}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  });
+}
+
+export function moveTask(
+  id: string,
+  payload: {
+    orderedIds: string[];
+    status: TaskStatus;
+  },
+): Promise<Task[]> {
+  return request<Task[]>(`/tasks/${encodeURIComponent(id)}/move`, {
     method: 'PATCH',
     body: JSON.stringify(payload),
   });

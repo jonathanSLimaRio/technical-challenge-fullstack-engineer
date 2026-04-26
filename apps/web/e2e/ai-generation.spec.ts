@@ -6,18 +6,18 @@ import {
 } from './helpers';
 
 const staticMockTaskTitles = new Set([
-  'Listar os menores próximos passos acionáveis',
-  'Identificar dependências, bloqueios e entradas necessárias',
-  'Priorizar as tarefas por impacto e urgência',
-  'Agendar o primeiro bloco de execução focada',
+  'Listar os menores proximos passos acionaveis',
+  'Identificar dependencias, bloqueios e entradas necessarias',
+  'Priorizar as tarefas por impacto e urgencia',
+  'Agendar o primeiro bloco de execucao focada',
   'Revisar o progresso e ajustar o plano',
 ]);
 
-test('generates AI tasks from the UI without asking for the provider key', async ({
+test('generates structured AI tasks from the UI without asking for the provider key', async ({
   page,
   request,
 }) => {
-  const goal = `E2E plano de revisão de IA ${Date.now()}`;
+  const goal = `E2E plano de revisao de IA ${Date.now()}`;
   await deleteTasksMatching(request, (task) => task.title.includes(goal));
 
   try {
@@ -36,6 +36,10 @@ test('generates AI tasks from the UI without asking for the provider key', async
       .filter({ hasText: `Esclarecer o resultado desejado para ${goal}` });
 
     await expect(uniqueGeneratedTask).toBeVisible();
+    await expect(uniqueGeneratedTask).toContainText(
+      'Definir o resultado esperado, os criterios de pronto',
+    );
+    await expect(uniqueGeneratedTask).toContainText('Planejamento');
 
     await page.getByRole('button', { name: /^IA/ }).click();
     await expect(uniqueGeneratedTask).toBeVisible();

@@ -6,6 +6,7 @@ import {
   KeyboardSensor,
   PointerSensor,
   type DragEndEvent,
+  useDroppable,
   useSensor,
   useSensors,
 } from '@dnd-kit/core';
@@ -49,31 +50,50 @@ import {
   fetchTasks,
   generateTasks,
   getApiOrigin,
-  reorderTasks,
+  moveTask,
   updateTask,
 } from '../lib/api';
-import type { Task } from '../types/task';
+import { TASK_STATUSES, type Task, type TaskStatus } from '../types/task';
 import { ToastViewport, useToastQueue } from './toast';
 import type { Theme } from './theme';
 import { useThemePreference } from './use-theme-preference';
 
 type TaskFilter = 'all' | 'pending' | 'done' | 'ai';
+type TaskLane = {
+  label: string;
+  status: TaskStatus;
+};
 
 const GOAL_MAX_LENGTH = 500;
 const TASK_DESCRIPTION_MAX_LENGTH = 1000;
 const TASK_LABEL_MAX_LENGTH = 40;
 const TASK_MAX_LENGTH = 160;
+const DONE_STATUS: TaskStatus = 'done';
+
+const TASK_LANES: TaskLane[] = [
+  { label: 'A Fazer', status: 'todo' },
+  { label: 'Fazendo', status: 'doing' },
+  { label: 'Block', status: 'blocked' },
+  { label: 'Concluído', status: 'done' },
+];
+
+const TASK_STATUS_LABELS: Record<TaskStatus, string> = TASK_LANES.reduce(
+  (labels, lane) => ({ ...labels, [lane.status]: lane.label }),
+  {} as Record<TaskStatus, string>,
+);
+const TASK_STATUS_SET = new Set<string>(TASK_STATUSES);
 
 const tooltipCopy = {
   addTask: 'Salvar esta tarefa manual na fila de execução.',
   aiFilter: 'Mostrar tarefas criadas pela IA.',
   cancelDelete: 'Manter esta tarefa e fechar a confirmação.',
   completionMetric: 'Percentual de tarefas marcadas como concluídas.',
+  createTaskDetails: 'Criar tarefa com título, conteúdo e etiqueta.',
   confirmDelete: 'Remover esta tarefa permanentemente.',
   deleteTask: 'Pedir confirmação antes de excluir esta tarefa.',
   doneFilter: 'Mostrar apenas tarefas concluídas.',
   doneMetric: 'Tarefas já marcadas como concluídas.',
-  dragTask: 'Arrastar para reordenar a fila de execução.',
+  dragTask: 'Arrastar para mover entre raias ou reordenar a fila.',
   editTask: 'Abrir detalhes para editar descrição e etiqueta.',
   generateTasks:
     'Criar e salvar tarefas sugeridas pela IA a partir deste objetivo.',
@@ -84,6 +104,7 @@ const tooltipCopy = {
   pendingMetric: 'Tarefas ainda aguardando conclusão.',
   refresh: 'Recarregar tarefas da API.',
   retry: 'Recarregar tarefas da API.',
+  quickCapture: 'Abrir captura rápida de tarefa.',
   showAll: 'Mostrar todas as tarefas.',
   syncOffline:
     'A conexão em tempo real está offline; atualize manualmente se precisar.',
@@ -130,11 +151,11 @@ function getErrorMessage(error: unknown): string {
 
 function getFilteredTasks(tasks: Task[], filter: TaskFilter): Task[] {
   if (filter === 'pending') {
-    return tasks.filter((task) => !task.isCompleted);
+    return tasks.filter((task) => getTaskStatus(task) !== DONE_STATUS);
   }
 
   if (filter === 'done') {
-    return tasks.filter((task) => task.isCompleted);
+    return tasks.filter((task) => getTaskStatus(task) === DONE_STATUS);
   }
 
   if (filter === 'ai') {
@@ -144,35 +165,113 @@ function getFilteredTasks(tasks: Task[], filter: TaskFilter): Task[] {
   return tasks;
 }
 
-function getReorderedTaskIds(
-  tasks: Task[],
-  visibleTasks: Task[],
-  activeId: string,
-  overId: string,
-): string[] {
-  const visibleIds = visibleTasks.map((task) => task.id);
-  const activeIndex = visibleIds.indexOf(activeId);
-  const overIndex = visibleIds.indexOf(overId);
-
-  if (activeIndex < 0 || overIndex < 0) {
-    return tasks.map((task) => task.id);
+function getVisibleLanes(filter: TaskFilter): TaskLane[] {
+  if (filter === 'pending') {
+    return TASK_LANES.filter((lane) => lane.status !== DONE_STATUS);
   }
 
-  const reorderedVisibleIds = arrayMove(visibleIds, activeIndex, overIndex);
-  const visibleIdSet = new Set(visibleIds);
-  let nextVisibleIndex = 0;
+  if (filter === 'done') {
+    return TASK_LANES.filter((lane) => lane.status === DONE_STATUS);
+  }
 
-  return tasks.map((task) => {
-    if (!visibleIdSet.has(task.id)) {
-      return task.id;
-    }
-
-    return reorderedVisibleIds[nextVisibleIndex++];
-  });
+  return TASK_LANES;
 }
 
-function getNormalizedTaskDetails(description: string, label: string) {
+function getTaskStatus(task: Task): TaskStatus {
+  return task.status ?? (task.isCompleted ? DONE_STATUS : 'todo');
+}
+
+function isTaskStatus(value: string): value is TaskStatus {
+  return TASK_STATUS_SET.has(value);
+}
+
+function withTaskStatus(task: Task, status: TaskStatus): Task {
   return {
+    ...task,
+    status,
+    isCompleted: status === DONE_STATUS,
+  };
+}
+
+function getTasksByStatus(tasks: Task[]): Record<TaskStatus, Task[]> {
+  const grouped: Record<TaskStatus, Task[]> = {
+    blocked: [],
+    doing: [],
+    done: [],
+    todo: [],
+  };
+
+  for (const task of tasks) {
+    grouped[getTaskStatus(task)].push(task);
+  }
+
+  return grouped;
+}
+
+function getDragTargetStatus(tasks: Task[], overId: string): TaskStatus | null {
+  if (isTaskStatus(overId)) {
+    return overId;
+  }
+
+  const task = tasks.find((item) => item.id === overId);
+  return task ? getTaskStatus(task) : null;
+}
+
+function getMovedTasks(
+  tasks: Task[],
+  activeId: string,
+  overId: string,
+  targetStatus: TaskStatus,
+): Task[] {
+  const activeTask = tasks.find((task) => task.id === activeId);
+
+  if (!activeTask) {
+    return tasks;
+  }
+
+  const sourceStatus = getTaskStatus(activeTask);
+  const grouped = getTasksByStatus(tasks);
+
+  if (sourceStatus === targetStatus && !isTaskStatus(overId)) {
+    const laneTasks = grouped[sourceStatus];
+    const activeIndex = laneTasks.findIndex((task) => task.id === activeId);
+    const overIndex = laneTasks.findIndex((task) => task.id === overId);
+
+    if (activeIndex >= 0 && overIndex >= 0) {
+      grouped[sourceStatus] = arrayMove(laneTasks, activeIndex, overIndex).map(
+        (task) => (task.id === activeId ? withTaskStatus(task, targetStatus) : task),
+      );
+
+      return TASK_STATUSES.flatMap((status) => grouped[status]);
+    }
+  }
+
+  grouped[sourceStatus] = grouped[sourceStatus].filter(
+    (task) => task.id !== activeId,
+  );
+
+  const movedTask = withTaskStatus(activeTask, targetStatus);
+  const targetTasks = grouped[targetStatus];
+  const targetIndex = isTaskStatus(overId)
+    ? targetTasks.length
+    : targetTasks.findIndex((task) => task.id === overId);
+
+  targetTasks.splice(
+    targetIndex >= 0 ? targetIndex : targetTasks.length,
+    0,
+    movedTask,
+  );
+
+  return TASK_STATUSES.flatMap((status) => grouped[status]);
+}
+
+function getNormalizedTaskInput(
+  title: string,
+  description: string,
+  label: string,
+) {
+  return {
+    title: title.trim().replace(/\s+/g, ' '),
     description: description.trim(),
     label: label.trim().replace(/\s+/g, ' '),
   };
@@ -186,8 +285,11 @@ export function SmartTodoApp() {
     mutate,
   } = useSWR<Task[]>('tasks', fetchTasks);
   const [manualTitle, setManualTitle] = useState('');
+  const [manualDescription, setManualDescription] = useState('');
+  const [manualLabel, setManualLabel] = useState('');
   const [goal, setGoal] = useState('');
   const [activeFilter, setActiveFilter] = useState<TaskFilter>('all');
+  const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
@@ -195,6 +297,7 @@ export function SmartTodoApp() {
     null,
   );
   const [editingTask, setEditingTask] = useState<Task | null>(null);
+  const [editTitle, setEditTitle] = useState('');
   const [editDescription, setEditDescription] = useState('');
   const [editLabel, setEditLabel] = useState('');
   const [isRealtimeConnected, setIsRealtimeConnected] = useState(false);
@@ -214,7 +317,9 @@ export function SmartTodoApp() {
   );
 
   const stats = useMemo(() => {
-    const completed = tasks.filter((task) => task.isCompleted).length;
+    const completed = tasks.filter(
+      (task) => getTaskStatus(task) === DONE_STATUS,
+    ).length;
     const aiGenerated = tasks.filter((task) => task.isAiGenerated).length;
     const pending = tasks.length - completed;
 
@@ -232,9 +337,13 @@ export function SmartTodoApp() {
     () => getFilteredTasks(tasks, activeFilter),
     [activeFilter, tasks],
   );
-  const filteredTaskIds = useMemo(
-    () => filteredTasks.map((task) => task.id),
+  const filteredTasksByStatus = useMemo(
+    () => getTasksByStatus(filteredTasks),
     [filteredTasks],
+  );
+  const visibleLanes = useMemo(
+    () => getVisibleLanes(activeFilter),
+    [activeFilter],
   );
 
   const filters = useMemo(
@@ -291,16 +400,23 @@ export function SmartTodoApp() {
   async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
-    const title = manualTitle.trim();
+    const normalizedTask = getNormalizedTaskInput(
+      manualTitle,
+      manualDescription,
+      manualLabel,
+    );
 
-    if (!title) {
+    if (!normalizedTask.title) {
       return;
     }
 
     setIsCreating(true);
     try {
-      const createdTask = await createTask(title);
+      const createdTask = await createTask(normalizedTask);
       setManualTitle('');
+      setManualDescription('');
+      setManualLabel('');
+      setIsQuickCaptureOpen(false);
       setActiveFilter('all');
       await mutate((currentTasks = []) => [createdTask, ...currentTasks], {
         revalidate: false,
@@ -311,6 +427,21 @@ export function SmartTodoApp() {
     } finally {
       setIsCreating(false);
     }
+  }
+
+  function handleOpenQuickCapture() {
+    setManualTitle('');
+    setManualDescription('');
+    setManualLabel('');
+    setIsQuickCaptureOpen(true);
+  }
+
+  function handleCloseQuickCapture() {
+    if (isCreating) {
+      return;
+    }
+
+    setIsQuickCaptureOpen(false);
   }
 
   async function handleGenerateTasks(event: FormEvent<HTMLFormElement>) {
@@ -342,12 +473,14 @@ export function SmartTodoApp() {
 
   async function handleToggleTask(task: Task) {
     const previousTasks = tasks;
+    const nextStatus =
+      getTaskStatus(task) === DONE_STATUS ? 'todo' : DONE_STATUS;
     setPending(task.id, true);
 
     await mutate(
       tasks.map((item) =>
         item.id === task.id
-          ? { ...item, isCompleted: !item.isCompleted }
+          ? withTaskStatus(item, nextStatus)
           : item,
       ),
       { revalidate: false },
@@ -355,7 +488,7 @@ export function SmartTodoApp() {
 
     try {
       const updatedTask = await updateTask(task.id, {
-        isCompleted: !task.isCompleted,
+        isCompleted: nextStatus === DONE_STATUS,
       });
       await mutate(
         (currentTasks = []) =>
@@ -395,6 +528,7 @@ export function SmartTodoApp() {
 
   function handleOpenTaskDetails(task: Task) {
     setEditingTask(task);
+    setEditTitle(task.title);
     setEditDescription(task.description ?? '');
     setEditLabel(task.label ?? '');
   }
@@ -415,14 +549,21 @@ export function SmartTodoApp() {
     }
 
     const previousTasks = tasks;
-    const normalizedDetails = getNormalizedTaskDetails(
+    const normalizedTask = getNormalizedTaskInput(
+      editTitle,
       editDescription,
       editLabel,
     );
+
+    if (!normalizedTask.title) {
+      return;
+    }
+
     const optimisticTask: Task = {
       ...editingTask,
-      description: normalizedDetails.description || null,
-      label: normalizedDetails.label || null,
+      title: normalizedTask.title,
+      description: normalizedTask.description || null,
+      label: normalizedTask.label || null,
     };
 
     setIsSavingTaskDetails(true);
@@ -434,7 +575,7 @@ export function SmartTodoApp() {
     );
 
     try {
-      const updatedTask = await updateTask(editingTask.id, normalizedDetails);
+      const updatedTask = await updateTask(editingTask.id, normalizedTask);
       await mutate(
         (currentTasks = []) =>
           currentTasks.map((item) =>
@@ -460,30 +601,36 @@ export function SmartTodoApp() {
       return;
     }
 
-    const previousTasks = tasks;
-    const orderedIds = getReorderedTaskIds(
-      tasks,
-      filteredTasks,
-      String(active.id),
-      String(over.id),
-    );
+    const activeId = String(active.id);
+    const overId = String(over.id);
+    const activeTask = tasks.find((task) => task.id === activeId);
+    const targetStatus = getDragTargetStatus(tasks, overId);
 
-    if (orderedIds.every((id, index) => id === tasks[index]?.id)) {
+    if (!activeTask || !targetStatus) {
       return;
     }
 
-    const taskById = new Map(tasks.map((task) => [task.id, task]));
-    const nextTasks = orderedIds
-      .map((id) => taskById.get(id))
-      .filter((task): task is Task => Boolean(task));
+    const previousTasks = tasks;
+    const nextTasks = getMovedTasks(tasks, activeId, overId, targetStatus);
+    const orderedIds = nextTasks.map((task) => task.id);
+
+    if (
+      getTaskStatus(activeTask) === targetStatus &&
+      orderedIds.every((id, index) => id === tasks[index]?.id)
+    ) {
+      return;
+    }
 
     setIsReordering(true);
     await mutate(nextTasks, { revalidate: false });
 
     try {
-      const reorderedTasks = await reorderTasks(orderedIds);
-      await mutate(reorderedTasks, { revalidate: false });
-      showToast({ type: 'success', message: 'Fila reordenada.' });
+      const movedTasks = await moveTask(activeId, {
+        orderedIds,
+        status: targetStatus,
+      });
+      await mutate(movedTasks, { revalidate: false });
+      showToast({ type: 'success', message: 'Quadro atualizado.' });
     } catch (requestError) {
       await mutate(previousTasks, { revalidate: false });
       showToast({ type: 'error', message: getErrorMessage(requestError) });
@@ -627,60 +774,6 @@ export function SmartTodoApp() {
             />
           </div>
 
-          <section className="quick-add-panel" aria-labelledby="quick-add-title">
-            <div className="panel-heading compact">
-              <span className="panel-icon soft" aria-hidden="true">
-                <Plus size={18} />
-              </span>
-              <div>
-                <p className="eyebrow">Captura rápida</p>
-                <h2 id="quick-add-title">Adicionar uma tarefa</h2>
-              </div>
-            </div>
-
-            <form className="form-grid" onSubmit={handleCreateTask}>
-              <div className="field-group">
-                <div className="label-row">
-                  <label htmlFor="manual-title">Título da tarefa</label>
-                  <span>{manualTitle.length}/{TASK_MAX_LENGTH}</span>
-                </div>
-                <Tooltip
-                  className="tooltip-fill"
-                  content={tooltipCopy.taskTitle}
-                >
-                  {(tooltipId) => (
-                    <input
-                      aria-describedby={tooltipId}
-                      id="manual-title"
-                      maxLength={TASK_MAX_LENGTH}
-                      onChange={(event) => setManualTitle(event.target.value)}
-                      placeholder="Reservar voos"
-                      type="text"
-                      value={manualTitle}
-                    />
-                  )}
-                </Tooltip>
-              </div>
-              <Tooltip className="tooltip-fill" content={tooltipCopy.addTask}>
-                {(tooltipId) => (
-                  <button
-                    aria-describedby={tooltipId}
-                    className="button secondary wide"
-                    disabled={isCreating || !manualTitle.trim()}
-                    type="submit"
-                  >
-                    {isCreating ? (
-                      <Loader2 className="spin" size={18} aria-hidden="true" />
-                    ) : (
-                      <Plus size={18} aria-hidden="true" />
-                    )}
-                    {isCreating ? 'Adicionando tarefa...' : 'Adicionar tarefa'}
-                  </button>
-                )}
-              </Tooltip>
-            </form>
-          </section>
-
           <div className="list-panel">
             <div className="task-toolbar">
               <div>
@@ -711,6 +804,22 @@ export function SmartTodoApp() {
                         ? 'Sincronização ativa'
                         : 'Sincronização offline'}
                     </span>
+                  )}
+                </Tooltip>
+                <Tooltip
+                  className="tooltip-control"
+                  content={tooltipCopy.quickCapture}
+                >
+                  {(tooltipId) => (
+                    <button
+                      aria-describedby={tooltipId}
+                      className="icon-button neutral"
+                      onClick={handleOpenQuickCapture}
+                      type="button"
+                    >
+                      <Plus size={19} aria-hidden="true" />
+                      <span className="sr-only">Abrir captura rápida</span>
+                    </button>
                   )}
                 </Tooltip>
                 <Tooltip
@@ -818,32 +927,27 @@ export function SmartTodoApp() {
                   onDragEnd={(event) => void handleDragEnd(event)}
                   sensors={sensors}
                 >
-                  <SortableContext
-                    items={filteredTaskIds}
-                    strategy={verticalListSortingStrategy}
+                  <div
+                    className={
+                      isReordering ? 'kanban-board reordering' : 'kanban-board'
+                    }
                   >
-                    <ul
-                      aria-label="Fila de execução reordenável"
-                      className={
-                        isReordering ? 'task-list reordering' : 'task-list'
-                      }
-                    >
-                      {filteredTasks.map((task) => (
-                        <SortableTaskCard
-                          isConfirmingDelete={confirmingDeleteId === task.id}
-                          isDisabled={isReordering}
-                          isPending={pendingIds.has(task.id)}
-                          key={task.id}
-                          onCancelDelete={() => setConfirmingDeleteId(null)}
-                          onDelete={handleDeleteTask}
-                          onOpenDetails={handleOpenTaskDetails}
-                          onStartDelete={handleStartDelete}
-                          onToggle={handleToggleTask}
-                          task={task}
-                        />
-                      ))}
-                    </ul>
-                  </SortableContext>
+                    {visibleLanes.map((lane) => (
+                      <KanbanLane
+                        confirmingDeleteId={confirmingDeleteId}
+                        isDisabled={isReordering}
+                        key={lane.status}
+                        lane={lane}
+                        onCancelDelete={() => setConfirmingDeleteId(null)}
+                        onDelete={handleDeleteTask}
+                        onOpenDetails={handleOpenTaskDetails}
+                        onStartDelete={handleStartDelete}
+                        onToggle={handleToggleTask}
+                        pendingIds={pendingIds}
+                        tasks={filteredTasksByStatus[lane.status]}
+                      />
+                    ))}
+                  </div>
                 </DndContext>
               ) : null}
             </div>
@@ -851,21 +955,108 @@ export function SmartTodoApp() {
         </section>
       </div>
 
+      {isQuickCaptureOpen ? (
+        <TaskFormModal
+          description={manualDescription}
+          isSaving={isCreating}
+          label={manualLabel}
+          mode="create"
+          onClose={handleCloseQuickCapture}
+          onDescriptionChange={setManualDescription}
+          onLabelChange={setManualLabel}
+          onSubmit={handleCreateTask}
+          onTitleChange={setManualTitle}
+          title={manualTitle}
+        />
+      ) : null}
+
       {editingTask ? (
-        <TaskDetailsModal
+        <TaskFormModal
           description={editDescription}
           isSaving={isSavingTaskDetails}
           label={editLabel}
+          mode="edit"
           onClose={handleCloseTaskDetails}
           onDescriptionChange={setEditDescription}
           onLabelChange={setEditLabel}
           onSubmit={handleSaveTaskDetails}
-          task={editingTask}
+          onTitleChange={setEditTitle}
+          title={editTitle}
         />
       ) : null}
 
       <ToastViewport onDismiss={dismissToast} toasts={toasts} />
     </main>
+  );
+}
+
+function KanbanLane({
+  confirmingDeleteId,
+  isDisabled,
+  lane,
+  onCancelDelete,
+  onDelete,
+  onOpenDetails,
+  onStartDelete,
+  onToggle,
+  pendingIds,
+  tasks,
+}: {
+  confirmingDeleteId: string | null;
+  isDisabled: boolean;
+  lane: TaskLane;
+  onCancelDelete: () => void;
+  onDelete: (task: Task) => void | Promise<void>;
+  onOpenDetails: (task: Task) => void;
+  onStartDelete: (taskId: string) => void;
+  onToggle: (task: Task) => void | Promise<void>;
+  pendingIds: Set<string>;
+  tasks: Task[];
+}) {
+  const { isOver, setNodeRef } = useDroppable({
+    data: { status: lane.status, type: 'lane' },
+    id: lane.status,
+  });
+  const taskIds = useMemo(() => tasks.map((task) => task.id), [tasks]);
+  const className = [
+    'kanban-lane',
+    `lane-${lane.status}`,
+    isOver ? 'over' : '',
+    tasks.length === 0 ? 'empty' : '',
+  ]
+    .filter(Boolean)
+    .join(' ');
+
+  return (
+    <section
+      aria-label={`Raia ${lane.label}`}
+      className={className}
+      ref={setNodeRef}
+    >
+      <div className="kanban-lane-header">
+        <h3>{lane.label}</h3>
+        <strong aria-label={`${tasks.length} tarefas`}>{tasks.length}</strong>
+      </div>
+
+      <SortableContext items={taskIds} strategy={verticalListSortingStrategy}>
+        <ul aria-label={`Tarefas em ${lane.label}`} className="task-list">
+          {tasks.map((task) => (
+            <SortableTaskCard
+              isConfirmingDelete={confirmingDeleteId === task.id}
+              isDisabled={isDisabled}
+              isPending={pendingIds.has(task.id)}
+              key={task.id}
+              onCancelDelete={onCancelDelete}
+              onDelete={onDelete}
+              onOpenDetails={onOpenDetails}
+              onStartDelete={onStartDelete}
+              onToggle={onToggle}
+              task={task}
+            />
+          ))}
+        </ul>
+      </SortableContext>
+    </section>
   );
 }
 
@@ -890,6 +1081,7 @@ function SortableTaskCard({
   onToggle: (task: Task) => void | Promise<void>;
   task: Task;
 }) {
+  const status = getTaskStatus(task);
   const {
     attributes,
     isDragging,
@@ -898,6 +1090,7 @@ function SortableTaskCard({
     transform,
     transition,
   } = useSortable({
+    data: { status, type: 'task' },
     disabled: isDisabled || isPending,
     id: task.id,
   });
@@ -909,7 +1102,8 @@ function SortableTaskCard({
   };
   const className = [
     'task-card',
-    task.isCompleted ? 'done' : '',
+    `status-${status}`,
+    status === DONE_STATUS ? 'done' : '',
     isDragging ? 'dragging' : '',
   ]
     .filter(Boolean)
@@ -939,7 +1133,9 @@ function SortableTaskCard({
 
       <Tooltip
         className="tooltip-control"
-        content={task.isCompleted ? tooltipCopy.markPending : tooltipCopy.markDone}
+        content={
+          status === DONE_STATUS ? tooltipCopy.markPending : tooltipCopy.markDone
+        }
       >
         {(tooltipId) => (
           <button
@@ -949,13 +1145,13 @@ function SortableTaskCard({
             onClick={() => void onToggle(task)}
             type="button"
           >
-            {task.isCompleted ? (
+            {status === DONE_STATUS ? (
               <CheckCircle2 size={23} aria-hidden="true" />
             ) : (
               <Circle size={23} aria-hidden="true" />
             )}
             <span className="sr-only">
-              {task.isCompleted
+              {status === DONE_STATUS
                 ? 'Marcar como pendente'
                 : 'Marcar como concluída'}
             </span>
@@ -974,6 +1170,9 @@ function SortableTaskCard({
             type="button"
           >
             <span className="task-title">{task.title}</span>
+            <span className={`status-chip status-${status}`}>
+              {TASK_STATUS_LABELS[status]}
+            </span>
             <span
               className={
                 description ? 'task-description' : 'task-description empty'
@@ -1067,28 +1266,41 @@ function SortableTaskCard({
   );
 }
 
-function TaskDetailsModal({
+function TaskFormModal({
   description,
   isSaving,
   label,
+  mode,
   onClose,
   onDescriptionChange,
   onLabelChange,
   onSubmit,
-  task,
+  onTitleChange,
+  title,
 }: {
   description: string;
   isSaving: boolean;
   label: string;
+  mode: 'create' | 'edit';
   onClose: () => void;
   onDescriptionChange: (value: string) => void;
   onLabelChange: (value: string) => void;
   onSubmit: (event: FormEvent<HTMLFormElement>) => void;
-  task: Task;
+  onTitleChange: (value: string) => void;
+  title: string;
 }) {
+  const dialogTitleId = useId();
   const titleId = useId();
   const descriptionId = useId();
   const labelId = useId();
+  const isCreateMode = mode === 'create';
+  const dialogTitle = isCreateMode ? 'Captura rápida' : 'Editar tarefa';
+  const eyebrow = isCreateMode ? 'Nova tarefa' : 'Detalhes da tarefa';
+  const submitLabel = isCreateMode ? 'Criar tarefa' : 'Salvar detalhes';
+  const savingLabel = isCreateMode ? 'Criando...' : 'Salvando...';
+  const submitTooltip = isCreateMode
+    ? tooltipCopy.createTaskDetails
+    : tooltipCopy.updateTaskDetails;
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -1114,7 +1326,7 @@ function TaskDetailsModal({
       }}
     >
       <form
-        aria-labelledby={titleId}
+        aria-labelledby={dialogTitleId}
         aria-modal="true"
         className="task-modal"
         onSubmit={onSubmit}
@@ -1122,8 +1334,8 @@ function TaskDetailsModal({
       >
         <div className="modal-header">
           <div>
-            <p className="eyebrow">Detalhes da tarefa</p>
-            <h2 id={titleId}>{task.title}</h2>
+            <p className="eyebrow">{eyebrow}</p>
+            <h2 id={dialogTitleId}>{dialogTitle}</h2>
           </div>
           <Tooltip
             className="tooltip-control tooltip-end"
@@ -1147,7 +1359,27 @@ function TaskDetailsModal({
         <div className="form-grid">
           <div className="field-group">
             <div className="label-row">
-              <label htmlFor={descriptionId}>Descrição</label>
+              <label htmlFor={titleId}>Título</label>
+              <span>{title.length}/{TASK_MAX_LENGTH}</span>
+            </div>
+            <Tooltip className="tooltip-fill" content={tooltipCopy.taskTitle}>
+              {(tooltipId) => (
+                <input
+                  aria-describedby={tooltipId}
+                  id={titleId}
+                  maxLength={TASK_MAX_LENGTH}
+                  onChange={(event) => onTitleChange(event.target.value)}
+                  placeholder="Reservar voos"
+                  type="text"
+                  value={title}
+                />
+              )}
+            </Tooltip>
+          </div>
+
+          <div className="field-group">
+            <div className="label-row">
+              <label htmlFor={descriptionId}>Conteúdo</label>
               <span>{description.length}/{TASK_DESCRIPTION_MAX_LENGTH}</span>
             </div>
             <textarea
@@ -1187,21 +1419,23 @@ function TaskDetailsModal({
           </button>
           <Tooltip
             className="tooltip-control"
-            content={tooltipCopy.updateTaskDetails}
+            content={submitTooltip}
           >
             {(tooltipId) => (
               <button
                 aria-describedby={tooltipId}
                 className="button primary"
-                disabled={isSaving}
+                disabled={isSaving || !title.trim()}
                 type="submit"
               >
                 {isSaving ? (
                   <Loader2 className="spin" size={18} aria-hidden="true" />
+                ) : isCreateMode ? (
+                  <Plus size={18} aria-hidden="true" />
                 ) : (
                   <Save size={18} aria-hidden="true" />
                 )}
-                {isSaving ? 'Salvando...' : 'Salvar detalhes'}
+                {isSaving ? savingLabel : submitLabel}
               </button>
             )}
           </Tooltip>

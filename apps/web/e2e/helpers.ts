@@ -8,8 +8,10 @@ export type TaskResponse = {
   description?: string | null;
   id: string;
   isAiGenerated: boolean;
+  isCompleted?: boolean;
   label?: string | null;
   position?: number;
+  status?: string;
   title: string;
 };
 
