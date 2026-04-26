@@ -40,7 +40,7 @@ import {
   X,
 } from 'lucide-react';
 import type { CSSProperties, FormEvent, ReactNode } from 'react';
-import { useEffect, useId, useMemo, useState } from 'react';
+import { useEffect, useId, useMemo, useRef, useState } from 'react';
 import { io } from 'socket.io-client';
 import useSWR from 'swr';
 import {
@@ -275,6 +275,26 @@ function getNormalizedTaskInput(
     description: description.trim(),
     label: label.trim().replace(/\s+/g, ' '),
   };
+}
+
+function getTaskPreviewContent(
+  task: Task,
+  status: TaskStatus,
+  description: string | undefined,
+  label: string | undefined,
+): ReactNode {
+  return (
+    <span className="task-preview-tooltip">
+      <strong>{task.title}</strong>
+      <span>{description || 'Sem descrição adicionada.'}</span>
+      <span className="task-preview-tooltip-meta">
+        <span>{TASK_STATUS_LABELS[status]}</span>
+        <span>{task.isAiGenerated ? 'Gerada por IA' : 'Manual'}</span>
+        <span>{label || 'Sem etiqueta'}</span>
+        <span>{formatDate(task.createdAt)}</span>
+      </span>
+    </span>
+  );
 }
 
 export function SmartTodoApp() {
@@ -1115,51 +1135,125 @@ function SortableTaskCard({
 
   return (
     <li className={className} ref={setNodeRef} style={style}>
-      <Tooltip className="tooltip-control" content={tooltipCopy.dragTask}>
-        {(tooltipId) => (
-          <button
-            aria-describedby={describedBy(tooltipId, sortableDescriptionId)}
-            aria-label={`Arrastar tarefa ${task.title}`}
-            className="drag-handle"
-            disabled={isDisabled || isPending}
-            type="button"
-            {...dragAttributes}
-            {...listeners}
+      <div className="task-card-actions">
+        <div className="task-card-actions-left">
+          <Tooltip className="tooltip-control" content={tooltipCopy.dragTask}>
+            {(tooltipId) => (
+              <button
+                aria-describedby={describedBy(tooltipId, sortableDescriptionId)}
+                aria-label={`Arrastar tarefa ${task.title}`}
+                className="drag-handle"
+                disabled={isDisabled || isPending}
+                type="button"
+                {...dragAttributes}
+                {...listeners}
+              >
+                <GripVertical size={19} aria-hidden="true" />
+              </button>
+            )}
+          </Tooltip>
+
+          <Tooltip
+            className="tooltip-control"
+            content={
+              status === DONE_STATUS
+                ? tooltipCopy.markPending
+                : tooltipCopy.markDone
+            }
           >
-            <GripVertical size={19} aria-hidden="true" />
-          </button>
+            {(tooltipId) => (
+              <button
+                aria-describedby={tooltipId}
+                className="toggle-button"
+                disabled={isPending}
+                onClick={() => void onToggle(task)}
+                type="button"
+              >
+                {status === DONE_STATUS ? (
+                  <CheckCircle2 size={23} aria-hidden="true" />
+                ) : (
+                  <Circle size={23} aria-hidden="true" />
+                )}
+                <span className="sr-only">
+                  {status === DONE_STATUS
+                    ? 'Marcar como pendente'
+                    : 'Marcar como concluída'}
+                </span>
+              </button>
+            )}
+          </Tooltip>
+        </div>
+
+        {isConfirmingDelete ? (
+          <div className="confirm-actions">
+            <Tooltip
+              className="tooltip-control"
+              content={tooltipCopy.confirmDelete}
+            >
+              {(tooltipId) => (
+                <button
+                  aria-describedby={tooltipId}
+                  className="mini-button danger"
+                  disabled={isPending}
+                  onClick={() => void onDelete(task)}
+                  type="button"
+                >
+                  {isPending ? (
+                    <Loader2 className="spin" size={16} aria-hidden="true" />
+                  ) : (
+                    <Trash2 size={16} aria-hidden="true" />
+                  )}
+                  Excluir
+                </button>
+              )}
+            </Tooltip>
+            <Tooltip
+              className="tooltip-control tooltip-end"
+              content={tooltipCopy.cancelDelete}
+            >
+              {(tooltipId) => (
+                <button
+                  aria-describedby={tooltipId}
+                  className="icon-button neutral small"
+                  disabled={isPending}
+                  onClick={onCancelDelete}
+                  type="button"
+                >
+                  <X size={17} aria-hidden="true" />
+                  <span className="sr-only">Cancelar exclusão</span>
+                </button>
+              )}
+            </Tooltip>
+          </div>
+        ) : (
+          <Tooltip
+            className="tooltip-control tooltip-end"
+            content={tooltipCopy.deleteTask}
+          >
+            {(tooltipId) => (
+              <button
+                aria-describedby={tooltipId}
+                className="icon-button danger"
+                disabled={isPending}
+                onClick={() => onStartDelete(task.id)}
+                type="button"
+              >
+                {isPending ? (
+                  <Loader2 className="spin" size={19} aria-hidden="true" />
+                ) : (
+                  <Trash2 size={19} aria-hidden="true" />
+                )}
+                <span className="sr-only">Excluir tarefa</span>
+              </button>
+            )}
+          </Tooltip>
         )}
-      </Tooltip>
+      </div>
 
       <Tooltip
-        className="tooltip-control"
-        content={
-          status === DONE_STATUS ? tooltipCopy.markPending : tooltipCopy.markDone
-        }
+        className="tooltip-fill task-card-preview-trigger"
+        content={getTaskPreviewContent(task, status, description, label)}
       >
-        {(tooltipId) => (
-          <button
-            aria-describedby={tooltipId}
-            className="toggle-button"
-            disabled={isPending}
-            onClick={() => void onToggle(task)}
-            type="button"
-          >
-            {status === DONE_STATUS ? (
-              <CheckCircle2 size={23} aria-hidden="true" />
-            ) : (
-              <Circle size={23} aria-hidden="true" />
-            )}
-            <span className="sr-only">
-              {status === DONE_STATUS
-                ? 'Marcar como pendente'
-                : 'Marcar como concluída'}
-            </span>
-          </button>
-        )}
-      </Tooltip>
-
-      <Tooltip className="tooltip-fill" content={tooltipCopy.editTask}>
         {(tooltipId) => (
           <button
             aria-describedby={tooltipId}
@@ -1197,71 +1291,6 @@ function SortableTaskCard({
           </button>
         )}
       </Tooltip>
-
-      {isConfirmingDelete ? (
-        <div className="confirm-actions">
-          <Tooltip
-            className="tooltip-control"
-            content={tooltipCopy.confirmDelete}
-          >
-            {(tooltipId) => (
-              <button
-                aria-describedby={tooltipId}
-                className="mini-button danger"
-                disabled={isPending}
-                onClick={() => void onDelete(task)}
-                type="button"
-              >
-                {isPending ? (
-                  <Loader2 className="spin" size={16} aria-hidden="true" />
-                ) : (
-                  <Trash2 size={16} aria-hidden="true" />
-                )}
-                Excluir
-              </button>
-            )}
-          </Tooltip>
-          <Tooltip
-            className="tooltip-control tooltip-end"
-            content={tooltipCopy.cancelDelete}
-          >
-            {(tooltipId) => (
-              <button
-                aria-describedby={tooltipId}
-                className="icon-button neutral small"
-                disabled={isPending}
-                onClick={onCancelDelete}
-                type="button"
-              >
-                <X size={17} aria-hidden="true" />
-                <span className="sr-only">Cancelar exclusão</span>
-              </button>
-            )}
-          </Tooltip>
-        </div>
-      ) : (
-        <Tooltip
-          className="tooltip-control tooltip-end"
-          content={tooltipCopy.deleteTask}
-        >
-          {(tooltipId) => (
-            <button
-              aria-describedby={tooltipId}
-              className="icon-button danger"
-              disabled={isPending}
-              onClick={() => onStartDelete(task.id)}
-              type="button"
-            >
-              {isPending ? (
-                <Loader2 className="spin" size={19} aria-hidden="true" />
-              ) : (
-                <Trash2 size={19} aria-hidden="true" />
-              )}
-              <span className="sr-only">Excluir tarefa</span>
-            </button>
-          )}
-        </Tooltip>
-      )}
     </li>
   );
 }
@@ -1588,12 +1617,39 @@ function Tooltip({
 }: {
   children: (tooltipId: string) => ReactNode;
   className?: string;
-  content: string;
+  content: ReactNode;
 }) {
   const tooltipId = useId();
+  const [isOpen, setIsOpen] = useState(false);
+  const ignorePointerFocusRef = useRef(false);
+
+  function handlePointerDown() {
+    ignorePointerFocusRef.current = true;
+    setIsOpen(false);
+    window.setTimeout(() => {
+      ignorePointerFocusRef.current = false;
+    }, 120);
+  }
 
   return (
-    <span className={`tooltip-wrap ${className}`.trim()}>
+    <span
+      className={`tooltip-wrap ${className}`.trim()}
+      data-open={isOpen ? 'true' : undefined}
+      onBlur={() => setIsOpen(false)}
+      onFocus={() => {
+        if (!ignorePointerFocusRef.current) {
+          setIsOpen(true);
+        }
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'Escape') {
+          setIsOpen(false);
+        }
+      }}
+      onMouseEnter={() => setIsOpen(true)}
+      onMouseLeave={() => setIsOpen(false)}
+      onPointerDown={handlePointerDown}
+    >
       {children(tooltipId)}
       <span className="tooltip-bubble" id={tooltipId} role="tooltip">
         {content}

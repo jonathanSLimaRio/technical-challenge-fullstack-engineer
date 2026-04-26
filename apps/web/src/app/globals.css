@@ -351,62 +351,6 @@ h3 {
   gap: 12px;
 }
 
-.tooltip-wrap {
-  position: relative;
-  display: inline-flex;
-  min-width: 0;
-}
-
-.tooltip-fill {
-  display: block;
-  width: 100%;
-}
-
-.tooltip-control {
-  display: inline-flex;
-}
-
-.tooltip-bubble {
-  position: absolute;
-  z-index: 20;
-  bottom: calc(100% + 8px);
-  left: 50%;
-  width: max-content;
-  max-width: min(260px, 80vw);
-  padding: 7px 9px;
-  border: 1px solid var(--tooltip-border);
-  border-radius: 8px;
-  background: var(--tooltip-bg);
-  color: var(--on-accent);
-  font-size: 0.76rem;
-  font-weight: 720;
-  line-height: 1.35;
-  opacity: 0;
-  pointer-events: none;
-  text-align: left;
-  transform: translate(-50%, 4px);
-  transition:
-    opacity 140ms ease,
-    transform 140ms ease;
-}
-
-.tooltip-end .tooltip-bubble {
-  right: 0;
-  left: auto;
-  transform: translateY(4px);
-}
-
-.tooltip-wrap:hover .tooltip-bubble,
-.tooltip-wrap:focus-within .tooltip-bubble {
-  opacity: 1;
-  transform: translate(-50%, 0);
-}
-
-.tooltip-end:hover .tooltip-bubble,
-.tooltip-end:focus-within .tooltip-bubble {
-  transform: translateY(0);
-}
-
 .field-group {
   gap: 8px;
 }
@@ -573,6 +517,7 @@ button:focus-visible,
   position: relative;
   display: inline-grid;
   min-width: 0;
+  isolation: isolate;
 }
 
 .tooltip-fill {
@@ -582,6 +527,10 @@ button:focus-visible,
 
 .tooltip-control {
   display: inline-grid;
+}
+
+.tooltip-wrap[data-open="true"] {
+  z-index: 30;
 }
 
 .tooltip-fill > input,
@@ -618,6 +567,7 @@ button:focus-visible,
     transform 140ms ease,
     visibility 140ms ease;
   visibility: hidden;
+  white-space: normal;
 }
 
 .tooltip-bubble::after {
@@ -643,16 +593,63 @@ button:focus-visible,
   transform: translateY(-5px) rotate(45deg);
 }
 
-.tooltip-wrap:hover > .tooltip-bubble,
-.tooltip-wrap:focus-within > .tooltip-bubble {
+.tooltip-wrap[data-open="true"] > .tooltip-bubble {
   opacity: 1;
   transform: translate(-50%, 0);
   visibility: visible;
 }
 
-.tooltip-end:hover > .tooltip-bubble,
-.tooltip-end:focus-within > .tooltip-bubble {
+.tooltip-end[data-open="true"] > .tooltip-bubble {
   transform: translateY(0);
+}
+
+.task-card-preview-trigger .tooltip-bubble {
+  top: calc(100% + 10px);
+  bottom: auto;
+  max-width: min(340px, calc(100vw - 32px));
+}
+
+.task-card-preview-trigger .tooltip-bubble::after {
+  top: auto;
+  bottom: 100%;
+  transform: translate(-50%, 5px) rotate(45deg);
+}
+
+.task-preview-tooltip {
+  display: grid;
+  width: min(316px, calc(100vw - 56px));
+  gap: 7px;
+}
+
+.task-preview-tooltip strong {
+  overflow-wrap: anywhere;
+  color: var(--on-accent);
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.task-preview-tooltip > span:not(.task-preview-tooltip-meta) {
+  color: rgba(255, 255, 255, 0.84);
+  font-weight: 620;
+}
+
+.task-preview-tooltip-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.task-preview-tooltip-meta span {
+  display: inline-flex;
+  min-height: 22px;
+  align-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(255, 255, 255, 0.88);
+  padding: 0 7px;
+  font-size: 0.68rem;
+  font-weight: 780;
 }
 
 .task-area {
@@ -1039,16 +1036,16 @@ button:focus-visible,
 }
 
 .task-card {
+  position: relative;
   display: grid;
-  grid-template-columns: 34px 34px minmax(0, 1fr) 34px;
-  grid-template-rows: 34px minmax(0, 1fr);
-  gap: 9px;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 10px;
   align-items: start;
   aspect-ratio: 1 / 1;
   min-height: 0;
-  overflow: hidden;
-  padding: 10px;
-  box-shadow: none;
+  overflow: visible;
+  padding: 11px;
+  box-shadow: 0 1px 0 rgba(15, 23, 42, 0.04);
   transition:
     border-color 160ms ease,
     background 160ms ease,
@@ -1056,8 +1053,33 @@ button:focus-visible,
     box-shadow 160ms ease;
 }
 
+.task-card::before {
+  position: absolute;
+  top: 12px;
+  bottom: 12px;
+  left: -1px;
+  width: 3px;
+  border-radius: 0 999px 999px 0;
+  background: var(--blue-border-soft);
+  content: "";
+  pointer-events: none;
+}
+
+.task-card.status-doing::before {
+  background: var(--blue);
+}
+
+.task-card.status-blocked::before {
+  background: var(--red);
+}
+
+.task-card.status-done::before {
+  background: var(--green);
+}
+
 .task-card:hover {
   border-color: var(--line-strong);
+  background: var(--surface-hover);
   box-shadow: var(--shadow-tiny);
   transform: translateY(-1px);
 }
@@ -1072,22 +1094,38 @@ button:focus-visible,
   box-shadow: var(--shadow-soft);
 }
 
-.task-card > .tooltip-fill {
-  grid-column: 1 / -1;
-  grid-row: 2;
+.task-card-actions {
+  position: relative;
+  z-index: 2;
+  display: flex;
+  min-width: 0;
+  min-height: 34px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.task-card-actions-left {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 6px;
+}
+
+.task-card .icon-button {
+  width: 34px;
+  height: 34px;
+  flex: 0 0 34px;
+}
+
+.task-card .icon-button.small {
+  width: 34px;
+  height: 34px;
+}
+
+.task-card-preview-trigger {
   align-self: stretch;
-}
-
-.task-card > .tooltip-control:last-child {
-  grid-column: 4;
-  grid-row: 1;
-  justify-self: end;
-}
-
-.task-card > .confirm-actions {
-  grid-column: 3 / -1;
-  grid-row: 1;
-  justify-self: end;
+  min-height: 0;
 }
 
 .drag-handle {
@@ -1147,13 +1185,23 @@ button:focus-visible,
   display: grid;
   width: 100%;
   height: 100%;
-  gap: 8px;
+  min-height: 0;
+  gap: 7px;
   align-content: start;
   border: 0;
+  border-radius: 6px;
   background: transparent;
   color: inherit;
-  padding: 0;
+  overflow: hidden;
+  padding: 2px;
   text-align: left;
+  transition:
+    background 160ms ease,
+    color 160ms ease;
+}
+
+.task-edit-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--surface-muted) 42%, transparent);
 }
 
 .task-edit-button:disabled {
@@ -1161,25 +1209,28 @@ button:focus-visible,
 }
 
 .task-title {
-  display: block;
+  display: -webkit-box;
   overflow-wrap: anywhere;
+  overflow: hidden;
   color: var(--text);
-  font-size: 1rem;
-  font-weight: 760;
-  line-height: 1.38;
+  font-size: 0.98rem;
+  font-weight: 820;
+  line-height: 1.32;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
 }
 
 .status-chip {
   display: inline-flex;
   width: fit-content;
-  min-height: 24px;
+  min-height: 22px;
   align-items: center;
   border: 1px solid var(--line);
   border-radius: 999px;
   background: var(--surface-soft);
   color: var(--text-secondary);
-  padding: 0 9px;
-  font-size: 0.72rem;
+  padding: 0 8px;
+  font-size: 0.68rem;
   font-weight: 820;
 }
 
@@ -1213,8 +1264,8 @@ button:focus-visible,
   gap: 6px;
   align-items: start;
   color: var(--text-secondary);
-  font-size: 0.88rem;
-  line-height: 1.45;
+  font-size: 0.84rem;
+  line-height: 1.4;
 }
 
 .task-description svg {
@@ -1237,25 +1288,31 @@ button:focus-visible,
 .task-meta {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
+  gap: 6px;
   align-items: center;
   color: var(--muted);
-  font-size: 0.82rem;
+  font-size: 0.78rem;
 }
 
 .task-meta span {
   display: inline-flex;
+  min-width: 0;
+  max-width: 100%;
   gap: 5px;
   align-items: center;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .badge {
-  min-height: 24px;
+  max-width: 100%;
+  min-height: 22px;
   border-radius: 999px;
   background: var(--badge-bg);
   color: var(--text-secondary);
-  padding: 0 9px;
-  font-size: 0.72rem;
+  padding: 0 8px;
+  font-size: 0.68rem;
   font-weight: 820;
   text-transform: uppercase;
 }
@@ -1266,13 +1323,14 @@ button:focus-visible,
 }
 
 .label-pill {
-  min-height: 24px;
+  max-width: 100%;
+  min-height: 22px;
   border: 1px solid var(--blue-border-soft);
   border-radius: 999px;
   background: var(--blue-soft);
   color: var(--blue);
-  padding: 0 9px;
-  font-size: 0.72rem;
+  padding: 0 8px;
+  font-size: 0.68rem;
   font-weight: 820;
 }
 
@@ -1283,13 +1341,16 @@ button:focus-visible,
 
 .confirm-actions {
   display: flex;
-  gap: 8px;
+  min-width: 0;
+  flex: 0 1 auto;
+  gap: 6px;
   align-items: center;
+  justify-content: flex-end;
 }
 
 .mini-button {
   display: inline-flex;
-  min-height: 36px;
+  min-height: 34px;
   align-items: center;
   justify-content: center;
   gap: 6px;
@@ -1302,6 +1363,14 @@ button:focus-visible,
 .mini-button.danger {
   background: var(--red);
   color: var(--on-accent);
+}
+
+.task-card .mini-button.danger {
+  width: 34px;
+  min-width: 34px;
+  padding: 0;
+  overflow: hidden;
+  font-size: 0;
 }
 
 .mini-button.danger:not(:disabled):hover {
@@ -1535,19 +1604,7 @@ button:focus-visible,
   }
 
   .task-card {
-    grid-template-columns: 34px 34px minmax(0, 1fr) 34px;
     align-items: start;
-  }
-
-  .task-card > .tooltip-control:last-child {
-    grid-column: 4;
-    grid-row: 1;
-  }
-
-  .confirm-actions {
-    grid-column: 3 / -1;
-    grid-row: 1;
-    justify-self: end;
   }
 
   .modal-backdrop {
