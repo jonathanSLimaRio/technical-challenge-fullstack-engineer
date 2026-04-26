@@ -212,6 +212,51 @@ test('shows refresh tooltip on hover and keyboard focus', async ({ page }) => {
 
   await refreshButton.focus();
   await expect(refreshTooltip).toBeVisible();
+
+  await refreshButton.click();
+  await expect(refreshTooltip).toBeHidden();
+});
+
+test('shows a full task preview only from the card body', async ({
+  page,
+  request,
+}) => {
+  const title = `E2E preview task ${Date.now()}`;
+  const description = 'Detalhar escopo, responsavel, prazo e criterios de pronto.';
+  const label = 'Preview';
+  await deleteTasksByTitle(request, title);
+
+  try {
+    await page.goto('/');
+    await waitForAppReady(page);
+    await createManualTaskFromModal(page, title, description, label);
+
+    const taskCard = page.locator('.task-card').filter({ hasText: title });
+    const cardBody = taskCard.getByRole('button', {
+      name: `Editar detalhes de ${title}`,
+    });
+    const previewTooltip = taskCard.locator(
+      '.task-card-preview-trigger [role="tooltip"]',
+    );
+    const dragTooltip = page.getByRole('tooltip', {
+      name: 'Arrastar para mover entre raias ou reordenar a fila.',
+    });
+
+    await cardBody.hover();
+    await expect(previewTooltip).toBeVisible();
+    await expect(previewTooltip).toContainText(title);
+    await expect(previewTooltip).toContainText(description);
+    await expect(previewTooltip).toContainText('A Fazer');
+    await expect(previewTooltip).toContainText('Manual');
+    await expect(previewTooltip).toContainText(label);
+
+    await taskCard.getByRole('button', { name: /Arrastar tarefa/ }).hover();
+
+    await expect(dragTooltip).toBeVisible();
+    await expect(previewTooltip).toBeHidden();
+  } finally {
+    await deleteTasksByTitle(request, title);
+  }
 });
 
 async function createManualTaskFromModal(
