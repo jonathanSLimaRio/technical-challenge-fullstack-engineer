@@ -139,6 +139,10 @@ test('previews, edits and saves structured AI tasks with a request provider key'
     await waitForAppReady(page);
     await expect(page.getByLabel('Chave da API do provedor')).toBeVisible();
     await page.getByLabel('Chave da API do provedor').fill('sk-e2e-secret');
+    await expect(page.getByText('Chave adicionada')).toBeVisible();
+    await expect(
+      page.getByRole('button', { name: 'Remover chave da API do provedor' }),
+    ).toBeVisible();
     await page.getByLabel('Objetivo').fill(goal);
     await page.getByRole('button', { name: 'Gerar rascunho' }).click();
 
