@@ -71,6 +71,56 @@ test('shows a modal skeleton while generating the AI draft', async ({ page }) =>
   );
 });
 
+test('keeps the AI draft modal scrollable with a visible header tooltip', async ({
+  page,
+}) => {
+  await page.setViewportSize({ width: 900, height: 520 });
+  await page.route(`${apiUrl}/tasks/ai-preview`, async (route) => {
+    await route.fulfill({
+      json: {
+        story: {
+          description: 'Story draft with enough content to inspect scroll.',
+          label: 'Plano',
+          title: 'Scrollable draft story',
+        },
+        subtasks: Array.from({ length: 10 }, (_item, index) => ({
+          description: `Subtask draft ${index + 1}`,
+          label: 'Planejamento',
+          title: `Scrollable draft subtask ${index + 1}`,
+        })),
+      },
+      status: 201,
+    });
+  });
+
+  await page.goto('/');
+  await waitForAppReady(page);
+  await page.getByLabel('Objetivo').fill(`E2E scroll modal ${Date.now()}`);
+  await page.getByRole('button', { name: 'Gerar rascunho' }).click();
+
+  const dialog = page.getByRole('dialog', {
+    name: 'Revise antes de salvar',
+  });
+  const modalBody = dialog.locator('.ai-draft-modal-body');
+
+  await expect(dialog.getByLabel('Rascunho do plano')).toBeVisible();
+  await expect.poll(async () =>
+    modalBody.evaluate((element) => element.scrollHeight > element.clientHeight),
+  ).toBe(true);
+
+  await modalBody.evaluate((element) => {
+    element.scrollTop = element.scrollHeight;
+  });
+  await expect.poll(async () =>
+    modalBody.evaluate((element) => element.scrollTop),
+  ).toBeGreaterThan(0);
+
+  await dialog.getByRole('button', { name: 'Fechar rascunho' }).hover();
+  await expect(dialog.getByRole('tooltip')).toContainText(
+    'Fechar rascunho da IA.',
+  );
+});
+
 test('previews, edits and saves structured AI tasks without asking for the provider key', async ({
   page,
   request,
