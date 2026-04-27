@@ -27,6 +27,7 @@ import {
   Clock3,
   FileText,
   GripVertical,
+  KeyRound,
   LayoutList,
   ListChecks,
   Loader2,
@@ -86,6 +87,7 @@ const DRAFT_CONFIRMATION_MS = 520;
 const DRAFT_SUBTASK_EXIT_MS = 180;
 const GOAL_MAX_LENGTH = 500;
 const AI_DRAFT_MAX_SUBTASKS = 10;
+const PROVIDER_API_KEY_MAX_LENGTH = 4096;
 const STATUS_PULSE_MS = 650;
 const TASK_DESCRIPTION_MAX_LENGTH = 1000;
 const TASK_LABEL_MAX_LENGTH = 40;
@@ -118,6 +120,8 @@ const tooltipCopy = {
   generateTasks:
     'Criar um rascunho editavel com tarefas sugeridas pela IA.',
   goal: 'Descreva um resultado concreto. A IA transforma isso em um rascunho editavel.',
+  providerApiKey:
+    'Use uma chave do provedor somente para esta geracao. Se ficar vazio, a API usara a chave configurada no servidor.',
   markDone: 'Marcar esta tarefa como concluída.',
   markPending: 'Mover esta tarefa de volta para pendente.',
   pendingFilter: 'Mostrar apenas tarefas em aberto.',
@@ -501,6 +505,7 @@ export function SmartTodoApp() {
   const [manualDescription, setManualDescription] = useState('');
   const [manualLabel, setManualLabel] = useState('');
   const [goal, setGoal] = useState('');
+  const [providerApiKey, setProviderApiKey] = useState('');
   const [activeFilter, setActiveFilter] = useState<TaskFilter>('all');
   const [activeMobileStatus, setActiveMobileStatus] =
     useState<MobileStatusFilter>('all');
@@ -888,6 +893,7 @@ export function SmartTodoApp() {
 
     try {
       const generatedDraft = await previewTasks(normalizedGoal, {
+        apiKey: providerApiKey,
         signal: abortController.signal,
       });
 
@@ -901,6 +907,7 @@ export function SmartTodoApp() {
         normalizedDraft.subtasks.map(() => createDraftSubtaskKey()),
       );
       setDraftModalStatus('ready');
+      setProviderApiKey('');
     } catch (requestError) {
       if (isAbortError(requestError)) {
         return;
@@ -1403,6 +1410,42 @@ export function SmartTodoApp() {
             </div>
 
             <form className="form-grid" onSubmit={handleGenerateTasks}>
+              <div className="field-group">
+                <label htmlFor="provider-api-key">
+                  Chave da API do provedor
+                </label>
+                <Tooltip
+                  className="tooltip-fill"
+                  content={tooltipCopy.providerApiKey}
+                >
+                  {(tooltipId) => (
+                    <span className="key-field">
+                      <KeyRound size={17} aria-hidden="true" />
+                      <input
+                        aria-describedby={describedBy(
+                          tooltipId,
+                          'provider-api-key-helper',
+                        )}
+                        autoComplete="off"
+                        id="provider-api-key"
+                        maxLength={PROVIDER_API_KEY_MAX_LENGTH}
+                        onChange={(event) =>
+                          setProviderApiKey(event.target.value)
+                        }
+                        placeholder="hf_your_token_here"
+                        spellCheck={false}
+                        type="password"
+                        value={providerApiKey}
+                      />
+                    </span>
+                  )}
+                </Tooltip>
+                <p className="field-hint secure" id="provider-api-key-helper">
+                  <KeyRound size={14} aria-hidden="true" />
+                  Enviada apenas nesta solicitacao; nao sera salva no navegador.
+                </p>
+              </div>
+
               <div className="field-group">
                 <div className="label-row">
                   <label htmlFor="goal">Objetivo</label>

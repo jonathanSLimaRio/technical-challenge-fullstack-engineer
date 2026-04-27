@@ -119,21 +119,32 @@ test('keeps the AI draft modal scrollable without a close tooltip', async ({
   await expect(dialog.getByRole('tooltip')).toHaveCount(0);
 });
 
-test('previews, edits and saves structured AI tasks without asking for the provider key', async ({
+test('previews, edits and saves structured AI tasks with a request provider key', async ({
   page,
   request,
 }) => {
   const goal = `E2E plano de revisao de IA ${Date.now()}`;
   const editedStoryTitle = `Plano editado ${goal}`;
   const editedSubtaskTitle = `Subtarefa editada ${goal}`;
+  let previewPayload: Record<string, unknown> | null = null;
   await deleteTasksMatching(request, (task) => task.title.includes(goal));
 
   try {
+    await page.route(`${apiUrl}/tasks/ai-preview`, async (route) => {
+      previewPayload = route.request().postDataJSON() as Record<string, unknown>;
+      await route.continue();
+    });
+
     await page.goto('/');
     await waitForAppReady(page);
-    await expect(page.getByLabel('Chave da API do provedor')).toHaveCount(0);
+    await expect(page.getByLabel('Chave da API do provedor')).toBeVisible();
+    await page.getByLabel('Chave da API do provedor').fill('sk-e2e-secret');
     await page.getByLabel('Objetivo').fill(goal);
     await page.getByRole('button', { name: 'Gerar rascunho' }).click();
+
+    await expect
+      .poll(() => previewPayload)
+      .toEqual({ apiKey: 'sk-e2e-secret', goal });
 
     const dialog = page.getByRole('dialog', {
       name: 'Revise antes de salvar',
@@ -155,6 +166,7 @@ test('previews, edits and saves structured AI tasks without asking for the provi
     await expect(page.locator('.toast-viewport')).toContainText(
       'Plano salvo com 1 historia e 5 subtarefas.',
     );
+    await expect(page.getByLabel('Chave da API do provedor')).toHaveValue('');
 
     const generatedStory = page
       .locator('.task-card')

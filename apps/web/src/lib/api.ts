@@ -94,6 +94,17 @@ type CreateTaskPayload = {
   title: string;
 };
 
+type AiGenerationOptions = Pick<RequestInit, 'signal'> & {
+  apiKey?: string;
+};
+
+// Monta o corpo de geracao por IA sem enviar chave vazia.
+function buildAiGenerationPayload(goal: string, apiKey: string | undefined) {
+  const normalizedApiKey = apiKey?.trim();
+
+  return normalizedApiKey ? { apiKey: normalizedApiKey, goal } : { goal };
+}
+
 // Cria uma tarefa manual usando título simples ou payload completo.
 export function createTask(payload: CreateTaskPayload | string): Promise<Task> {
   const body = typeof payload === 'string' ? { title: payload } : payload;
@@ -143,10 +154,14 @@ export function deleteTask(id: string): Promise<void> {
 }
 
 // Gera tarefas por IA e já retorna a lista persistida pela API.
-export async function generateTasks(goal: string): Promise<Task[]> {
+export async function generateTasks(
+  goal: string,
+  options: AiGenerationOptions = {},
+): Promise<Task[]> {
   const response = await request<GenerateTasksResponse>('/tasks/ai-generate', {
     method: 'POST',
-    body: JSON.stringify({ goal }),
+    signal: options.signal,
+    body: JSON.stringify(buildAiGenerationPayload(goal, options.apiKey)),
   });
 
   return response.tasks;
@@ -155,12 +170,12 @@ export async function generateTasks(goal: string): Promise<Task[]> {
 // Gera um rascunho editável de IA sem persistir tarefas.
 export function previewTasks(
   goal: string,
-  options: Pick<RequestInit, 'signal'> = {},
+  options: AiGenerationOptions = {},
 ): Promise<AiDraftPlan> {
   return request<AiDraftPlan>('/tasks/ai-preview', {
     method: 'POST',
     signal: options.signal,
-    body: JSON.stringify({ goal }),
+    body: JSON.stringify(buildAiGenerationPayload(goal, options.apiKey)),
   });
 }
 
