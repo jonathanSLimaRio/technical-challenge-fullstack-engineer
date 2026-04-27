@@ -1,0 +1,34 @@
+{
+  "name": "smart-todo-web",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "next build",
+    "dev": "next dev --hostname 0.0.0.0 --port 3000",
+    "lint": "eslint . --max-warnings=0",
+    "start": "next start --hostname 0.0.0.0 --port 3000",
+    "build:e2e": "node scripts/build-e2e.mjs",
+    "start:e2e": "node .next-e2e/standalone/server.js",
+    "test:e2e": "npm run build:e2e && playwright test"
+  },
+  "dependencies": {
+    "@dnd-kit/core": "^6.3.1",
+    "@dnd-kit/sortable": "^10.0.0",
+    "@dnd-kit/utilities": "^3.2.2",
+    "lucide-react": "^1.11.0",
+    "next": "^16.2.4",
+    "react": "^19.2.5",
+    "react-dom": "^19.2.5",
+    "socket.io-client": "^4.8.3",
+    "swr": "^2.4.1"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.59.1",
+    "@types/node": "^25.6.0",
+    "@types/react": "^19.2.14",
+    "@types/react-dom": "^19.2.3",
+    "eslint": "^9.39.4",
+    "eslint-config-next": "^16.2.4",
+    "typescript": "^6.0.3"
+  }
+}

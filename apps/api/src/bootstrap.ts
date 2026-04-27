@@ -1,0 +1,62 @@
+import { INestApplication, ValidationPipe } from '@nestjs/common';
+import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
+import helmet from 'helmet';
+
+// Transforma a lista de origens permitidas em valores limpos para o CORS.
+function parseCorsOrigins(value: string | undefined): string[] {
+  return (value ?? 'http://localhost:3000')
+    .split(',')
+    .map((origin) => origin.trim())
+    .filter(Boolean);
+}
+
+// Aplica segurança, CORS, validação global e documentação Swagger na aplicação.
+export function configureApp(app: INestApplication): void {
+  const isProduction = process.env.NODE_ENV === 'production';
+
+  app.use(
+    helmet({
+      contentSecurityPolicy: isProduction
+        ? {
+            directives: {
+              baseUri: ["'self'"],
+              defaultSrc: ["'self'"],
+              frameAncestors: ["'none'"],
+              objectSrc: ["'none'"],
+            },
+          }
+        : false,
+      hsts: isProduction,
+    }),
+  );
+
+  app.enableCors({
+    origin: parseCorsOrigins(process.env.CORS_ORIGIN),
+    methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
+  });
+
+  app.useGlobalPipes(
+    new ValidationPipe({
+      forbidNonWhitelisted: true,
+      transform: true,
+      whitelist: true,
+    }),
+  );
+
+  const shouldEnableSwagger =
+    !isProduction || process.env.ENABLE_SWAGGER === 'true';
+
+  if (shouldEnableSwagger) {
+    const swaggerConfig = new DocumentBuilder()
+      .setTitle('Smart To-Do List API')
+      .setDescription('API de gerenciamento de tarefas e decomposição com IA.')
+      .setVersion('1.0')
+      .build();
+
+    SwaggerModule.setup(
+      'docs',
+      app,
+      SwaggerModule.createDocument(app, swaggerConfig),
+    );
+  }
+}

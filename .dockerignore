@@ -1,0 +1,10 @@
+node_modules
+apps/*/node_modules
+apps/*/.next
+apps/*/dist
+apps/*/data
+coverage
+.git
+.env
+data
+npm-debug.log*

@@ -1,77 +1,208 @@
-# Sinky Technical Challenge - Full Stack Senior Engineer
+# Smart To-Do List AI-Powered
 
-## 🚀 O Desafio: Smart To-Do List (AI-Powered)
+Full-stack technical challenge built with NestJS, Next.js, SQLite, Swagger and Docker Compose.
 
-Este desafio visa avaliar suas habilidades como **Engenheiro(a) Full-Stack Sênior** na construção de uma aplicação moderna, funcional e resiliente. O objetivo é desenvolver uma **"Smart To-Do List"**: uma lista de tarefas que integra Inteligência Artificial para decompor objetivos de alto nível (ex: "Planejar uma viagem") em subtarefas acionáveis.
+The app lets users manage tasks manually and ask a Hugging Face-hosted LLM to break a high-level goal into actionable tasks. The provider API key can be pasted into the planner for a single request, or configured on the server through `.env` as a fallback.
 
----
+## Stack
 
-## 🛠 Stacks Tecnológicas e Requisitos
+- Backend: NestJS, TypeScript, TypeORM, SQLite, Swagger, Socket.IO
+- Frontend: Next.js App Router, TypeScript, SWR, Playwright
+- Infra: Docker Compose, Node.js 22
+- Tests: Jest unit tests for backend business logic and AI parsing/error paths
 
-### 1. Backend: NestJS com TypeScript
+## For Reviewers
 
-O backend será o cérebro da aplicação, responsável pela lógica de negócios, persistência e comunicação com a IA.
+The fastest path is Docker Compose. From a fresh clone:
 
-* **Lógica de Negócios:** Implementar o gerenciamento completo do ciclo de vida de tarefas:
-* Criação, Leitura/Listagem, Atualização (ex: marcar como concluída) e Exclusão.
+```bash
+git clone <repository-url>
+cd technical-challenge-fullstack-engineer
+cp .env.example .env
+```
 
+Open `.env` and choose one AI mode:
 
-* **Persistência de Dados:** Utilizar **SQLite** para garantir portabilidade. O modelo da tarefa deve incluir, no mínimo: `id`, `title`, `isCompleted`, `createdAt` e um campo identificando se foi gerada por IA.
-* **Integração com IA:**
-* Desenvolver um endpoint que receba um prompt/objetivo do usuário.
-* Comunicar-se com uma API de Inferência de LLM (Hugging Face, OpenRouter, OpenAI ou similar).
-* **Prompt Engineering:** Enviar o prompt de forma estruturada para garantir uma resposta processável (ex: JSON).
-* Processar a resposta, extrair as tarefas e persisti-las automaticamente no banco de dados.
-* **Segurança:** Deixe um campo disponível para inserir a API Key do provedor; **não** compartilhe sua chave no código.
+```bash
+# Real Hugging Face integration
+LLM_PROVIDER=huggingface
+LLM_API_KEY=hf_your_real_token_here
+```
 
+The token must have access to Hugging Face Inference Providers. If you only
+want to review the product flow without an external provider, use mock mode:
 
+```bash
+LLM_PROVIDER=mock
+LLM_API_KEY=
+```
 
-### 2. Frontend: Next.js com TypeScript
+Then start the full stack:
 
-A interface deve ser reativa, intuitiva e consumir a API criada.
+```bash
+docker compose up --build
+```
 
-* **Gerenciamento de Estado:** Exibir e gerenciar a lista de tarefas de forma eficiente, refletindo criações e atualizações em tempo real sem recarregar a página.
-* **Interatividade:**
-* Formulário para criação manual de tarefas.
-* Ações para marcar/desmarcar conclusão e deletar tarefas.
+When both containers are healthy, open:
 
+- Web app: http://localhost:3000
+- API healthcheck: http://localhost:3001/health
+- Swagger: http://localhost:3001/docs
 
-* **Funcionalidade de IA:**
-* Interface clara com campo de texto e botão para descrever o objetivo, além de um campo para adicionar a API Key do provedor.
-* **UX de Latência:** Implementar **Loading States** claros e feedbacks visuais enquanto a IA processa a requisição.
+Manual task management works as soon as Docker is running. AI generation works
+with either a valid Hugging Face key in the planner or `.env`, or
+`LLM_PROVIDER=mock`.
 
+Useful review checks:
 
+```bash
+docker compose ps
+curl http://localhost:3001/health
+```
 
----
+Open the app in two browser tabs to see task changes sync through WebSocket
+events. Useful quality commands outside Docker:
 
-## 🏗 Engenharia e Qualidade (Critérios de Elite)
+```bash
+npm --prefix apps/api test
+npm --prefix apps/api run build
+npm --prefix apps/web run lint
+npm --prefix apps/web run build
+npm run test:e2e
+```
 
-Para este nível de posição, avaliaremos a maturidade da sua engenharia:
+Security decisions included for review: Helmet on Nest, explicit security
+headers on Next, global API throttling, stricter AI-generation throttling,
+Swagger gated outside production unless `ENABLE_SWAGGER=true`, and TypeORM
+schema synchronization disabled unless `TYPEORM_SYNCHRONIZE=true`.
 
-1. **Arquitetura:** Separação clara de responsabilidades (Controllers, Services, Providers/Modules).
-2. **Resiliência:** Tratamento de erros para falhas na API de IA (timeouts ou respostas inválidas).
-3. **Documentação:** Uso de **Swagger** para documentar os endpoints da API.
-4. **Testes:** Implementação de testes unitários para a lógica de negócio principal no backend.
-5. **Docker:** O projeto deve conter um `docker-compose.yml` para rodar a stack completa (Front + Back) com um único comando.
+## Running With Docker
 
----
+Prerequisites: Docker Desktop or Docker Engine with Compose, and ports `3000`
+and `3001` available.
 
-## 📐 Critérios de Avaliação
+```bash
+cp .env.example .env
+docker compose up --build
+```
 
-1. **Qualidade do Código:** SOLID, Clean Code e tipagem forte (TypeScript).
-2. **Robustez:** Como o sistema lida com o "não determinismo" e falhas de APIs de IA.
-3. **Domínio Técnico:** Uso idiomático das ferramentas (NestJS e Next.js).
-4. **UX Consciente:** Feedback de erros e estados de espera para o usuário.
+The compose file reads `.env` automatically and starts:
 
----
+- Web app: http://localhost:3000
+- API: http://localhost:3001
+- Swagger: http://localhost:3001/docs
 
-## 📤 Entrega
+For real AI generation, either paste the provider key in the planner UI or fill
+`LLM_API_KEY` in `.env` and keep `LLM_PROVIDER=huggingface`. For a no-key demo,
+set `LLM_PROVIDER=mock`.
 
-1. Repositório público no GitHub (ou privado com acesso liberado).
-2. `README.md` com instruções de execução e uma breve explicação das decisões técnicas e trade-offs realizados.
+To confirm the stack is ready:
 
-### Dica
+```bash
+docker compose ps
+curl http://localhost:3001/health
+```
 
-Na Sinky, valorizamos o pragmatismo. Se você precisar tomar uma decisão de arquitetura para ganhar tempo ou garantir performance, sinta-se à vontade para fazê-lo, desde que explique o seu raciocínio no README da entrega. Queremos entender como você pensa e como prioriza trade-offs.
+To stop the containers:
 
----
+```bash
+docker compose down
+```
+
+To also remove the local SQLite Docker volume and start with an empty database:
+
+```bash
+docker compose down -v
+```
+
+## Running Locally
+
+```bash
+npm --prefix apps/api install
+npm --prefix apps/web install
+npm run dev:api
+npm run dev:web
+```
+
+The API runs on `http://localhost:3001` and the web app on `http://localhost:3000`.
+Open the app in two browser tabs to see task changes sync in real time through
+WebSocket events.
+
+## Environment
+
+Create a local `.env` from the example file if you want server-side defaults:
+
+```bash
+cp .env.example .env
+```
+
+Use the same variables when running services locally outside Docker.
+
+```bash
+PORT=3001
+CORS_ORIGIN=http://localhost:3000
+SQLITE_PATH=./data/smart-todos.sqlite
+ENABLE_SWAGGER=true
+TYPEORM_SYNCHRONIZE=true
+THROTTLE_TTL_MS=60000
+THROTTLE_LIMIT=100
+AI_THROTTLE_TTL_MS=60000
+AI_THROTTLE_LIMIT=5
+LLM_PROVIDER=huggingface
+LLM_API_KEY=hf_your_token_here
+LLM_BASE_URL=https://router.huggingface.co/v1
+LLM_MODEL=openai/gpt-oss-20b:cheapest
+LLM_TIMEOUT_MS=20000
+NEXT_PUBLIC_API_URL=http://localhost:3001
+```
+
+Replace `LLM_API_KEY` in your local `.env` with a Hugging Face token that has
+Inference Providers permission, or leave it empty and paste the key in the UI
+when generating a plan. Request keys are not stored by the app.
+
+For a no-key demo, set:
+
+```bash
+LLM_PROVIDER=mock
+```
+
+The backend will not call any external provider in mock mode.
+
+## API
+
+- `GET /tasks`: list tasks
+- `POST /tasks`: create a manual task with title, description and label
+- `PATCH /tasks/:id`: update title, description, label or completion status
+- `PATCH /tasks/:id/move`: move a task between kanban lanes and persist order
+- `PATCH /tasks/reorder`: persist the execution queue order
+- `DELETE /tasks/:id`: delete a task
+- `POST /tasks/ai-generate`: generate and persist AI-created tasks; accepts an optional request `apiKey`
+- `POST /tasks/ai-preview`: generate an editable AI draft without persisting; accepts an optional request `apiKey`
+- `POST /tasks/ai-confirm`: persist an edited AI draft as generated tasks
+- `GET /health`: API and database healthcheck
+
+Swagger documentation is available at `/docs` when `NODE_ENV !== 'production'`
+or `ENABLE_SWAGGER=true`.
+
+## Quality Checks
+
+```bash
+npm --prefix apps/api test
+npm --prefix apps/api run build
+npm --prefix apps/web run lint
+npm --prefix apps/web run build
+npm run test:e2e
+```
+
+## Decisões e Trade-Offs
+
+- TypeORM com SQLite foi escolhido para uma implementação NestJS rápida e idiomática, com persistência portável. A sincronização de schema é opcional via `TYPEORM_SYNCHRONIZE=true`; em produção, devem ser usadas migrations explícitas.
+- A integração com LLM usa Hugging Face Inference Providers por meio do roteador de chat completions compatível com OpenAI, então provedores compatíveis ainda podem ser trocados alterando `LLM_BASE_URL` e `LLM_MODEL`.
+- A resposta da IA é tratada como não confiável: o backend solicita JSON estrito, remove code fences comuns, valida o formato, deduplica títulos, limita tarefas geradas, tenta novamente uma vez em falhas transitórias do provedor e se recusa a persistir qualquer dado quando o parsing falha.
+- A UI principal exibe uma prévia da saída da IA antes da persistência para que usuários possam editar a história e as subtarefas, enquanto `POST /tasks/ai-generate` continua disponível para avaliadores e clientes de API que queiram o fluxo de persistência automática do desafio.
+- `LLM_PROVIDER=mock` é um modo deliberado de demonstração e revisão. Ele comprova o fluxo de IA sem exigir secrets, acesso à rede ou créditos de provedor.
+- Os logs usam mensagens em formato JSON para eventos importantes, como mudanças no ciclo de vida de tarefas, geração por IA, falhas de provedor, timeouts e respostas inválidas da IA. Eles evitam chaves de API, prompts brutos e respostas brutas do provedor.
+- A chave de API do provedor pode ser enviada pelo formulario do planner para uma unica chamada de IA ou lida do ambiente do servidor como fallback. Ela nao e armazenada no SQLite, localStorage, sessionStorage, cookies ou logs.
+- O Docker Compose inclui healthchecks para os dois serviços, e o serviço web aguarda uma API saudável antes de iniciar.
+- O workspace usa `legacy-peer-deps=true` para que o npm não instale peers opcionais vulneráveis e não usados, como o driver `sqlite3`; a aplicação usa `better-sqlite3` explicitamente.
+- `npm audit --omit=dev` ainda reporta advisories transitivos moderados em dependências fixadas pelos frameworks (`next -> postcss` e `typeorm -> uuid`). Forçar essas correções atualmente faz downgrade de pacotes major, então elas são documentadas em vez de sobrescritas de forma insegura.
