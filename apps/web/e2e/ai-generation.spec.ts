@@ -71,7 +71,7 @@ test('shows a modal skeleton while generating the AI draft', async ({ page }) =>
   );
 });
 
-test('keeps the AI draft modal scrollable with a visible header tooltip', async ({
+test('keeps the AI draft modal scrollable without a close tooltip', async ({
   page,
 }) => {
   await page.setViewportSize({ width: 900, height: 520 });
@@ -116,9 +116,7 @@ test('keeps the AI draft modal scrollable with a visible header tooltip', async 
   ).toBeGreaterThan(0);
 
   await dialog.getByRole('button', { name: 'Fechar rascunho' }).hover();
-  await expect(dialog.getByRole('tooltip')).toContainText(
-    'Fechar rascunho da IA.',
-  );
+  await expect(dialog.getByRole('tooltip')).toHaveCount(0);
 });
 
 test('previews, edits and saves structured AI tasks without asking for the provider key', async ({
