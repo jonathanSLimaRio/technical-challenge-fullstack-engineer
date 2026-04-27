@@ -31,6 +31,10 @@ test('shows loading and empty states for the task list', async ({ page }) => {
 test('shows API errors and retries the task list request', async ({ page }) => {
   let shouldFail = true;
 
+  await page.route('**/socket.io/**', async (route) => {
+    await route.abort();
+  });
+
   await page.route(`${apiUrl}/tasks`, async (route) => {
     if (shouldFail) {
       await route.fulfill({
@@ -57,9 +61,14 @@ test('shows API errors and retries the task list request', async ({ page }) => {
     name: 'Tentar novamente',
   });
 
-  if (await retryButton.isVisible()) {
-    await retryButton.click().catch(() => undefined);
-  }
+  await expect(retryButton).toBeVisible();
+  await Promise.all([
+    page.waitForResponse(
+      (response) =>
+        response.url() === `${apiUrl}/tasks` && response.status() === 200,
+    ),
+    retryButton.click(),
+  ]);
 
   await expect(
     page.getByRole('heading', { name: 'Sua fila está pronta' }),
