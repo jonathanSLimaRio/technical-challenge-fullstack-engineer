@@ -71,13 +71,17 @@ import { useThemePreference } from './use-theme-preference';
 type TaskFilter = 'all' | 'pending' | 'done' | 'ai';
 type MobileStatusFilter = 'all' | TaskStatus;
 type AiDraftModalStatus = 'error' | 'loading' | 'ready';
+type DraftSaveState = 'confirmed' | 'idle' | 'saving';
 type TaskLane = {
   label: string;
   status: TaskStatus;
 };
 
+const DRAFT_CONFIRMATION_MS = 520;
+const DRAFT_SUBTASK_EXIT_MS = 180;
 const GOAL_MAX_LENGTH = 500;
 const AI_DRAFT_MAX_SUBTASKS = 10;
+const STATUS_PULSE_MS = 650;
 const TASK_DESCRIPTION_MAX_LENGTH = 1000;
 const TASK_LABEL_MAX_LENGTH = 40;
 const TASK_MAX_LENGTH = 160;
@@ -170,6 +174,12 @@ function getErrorMessage(error: unknown): string {
 
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
+}
+
+function waitForMotion(ms: number): Promise<void> {
+  return new Promise((resolve) => {
+    setTimeout(resolve, ms);
+  });
 }
 
 function getRootTasks(tasks: Task[]): Task[] {
@@ -466,11 +476,16 @@ export function SmartTodoApp() {
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
-  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [draftSaveState, setDraftSaveState] =
+    useState<DraftSaveState>('idle');
   const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
   const [draftModalStatus, setDraftModalStatus] =
     useState<AiDraftModalStatus>('loading');
   const [draftPlan, setDraftPlan] = useState<AiDraftPlan | null>(null);
+  const [draftSubtaskKeys, setDraftSubtaskKeys] = useState<string[]>([]);
+  const [removingDraftSubtaskKeys, setRemovingDraftSubtaskKeys] = useState<
+    Set<string>
+  >(() => new Set());
   const [draftError, setDraftError] = useState<string | null>(null);
   const [draftPreviewError, setDraftPreviewError] = useState<string | null>(
     null,
@@ -490,9 +505,21 @@ export function SmartTodoApp() {
   const [isReordering, setIsReordering] = useState(false);
   const [isSavingTaskDetails, setIsSavingTaskDetails] = useState(false);
   const [isMobileTaskFlow, setIsMobileTaskFlow] = useState(false);
+  const [statusPulseTaskIds, setStatusPulseTaskIds] = useState<Set<string>>(
+    () => new Set(),
+  );
+  const draftSubtaskKeysRef = useRef<string[]>([]);
+  const draftRemovalTimeoutsRef = useRef(
+    new Map<string, ReturnType<typeof setTimeout>>(),
+  );
+  const nextDraftSubtaskUiIdRef = useRef(1);
+  const statusPulseTimeoutsRef = useRef(
+    new Map<string, ReturnType<typeof setTimeout>>(),
+  );
   const modalReturnFocusRef = useRef<HTMLElement | null>(null);
   const draftPreviewAbortRef = useRef<AbortController | null>(null);
   const draftGoalRef = useRef('');
+  const isSavingDraft = draftSaveState !== 'idle';
   const [theme, setThemePreference] = useThemePreference();
   const { dismissToast, showToast, toasts } = useToastQueue();
   const sensors = useSensors(
@@ -639,8 +666,19 @@ export function SmartTodoApp() {
   }, [mutate]);
 
   useEffect(() => {
+    draftSubtaskKeysRef.current = draftSubtaskKeys;
+  }, [draftSubtaskKeys]);
+
+  useEffect(() => {
+    const draftRemovalTimeouts = draftRemovalTimeoutsRef.current;
+    const statusPulseTimeouts = statusPulseTimeoutsRef.current;
+
     return () => {
       draftPreviewAbortRef.current?.abort();
+      draftRemovalTimeouts.forEach((timeout) => clearTimeout(timeout));
+      draftRemovalTimeouts.clear();
+      statusPulseTimeouts.forEach((timeout) => clearTimeout(timeout));
+      statusPulseTimeouts.clear();
     };
   }, []);
 
@@ -679,6 +717,61 @@ export function SmartTodoApp() {
         element.focus();
       }
     }, 0);
+  }
+
+  function createDraftSubtaskKey(): string {
+    const key = `draft-subtask-${nextDraftSubtaskUiIdRef.current}`;
+    nextDraftSubtaskUiIdRef.current += 1;
+    return key;
+  }
+
+  function clearDraftRemovalTimeouts() {
+    draftRemovalTimeoutsRef.current.forEach((timeout) =>
+      clearTimeout(timeout),
+    );
+    draftRemovalTimeoutsRef.current.clear();
+  }
+
+  function resetDraftMotionState() {
+    clearDraftRemovalTimeouts();
+    setDraftSubtaskKeys([]);
+    setRemovingDraftSubtaskKeys(new Set());
+    setDraftSaveState('idle');
+  }
+
+  function getDraftWithoutRemovingSubtasks(plan: AiDraftPlan): AiDraftPlan {
+    return {
+      ...plan,
+      subtasks: plan.subtasks.filter((_subtask, index) => {
+        const key = draftSubtaskKeysRef.current[index];
+        return !key || !removingDraftSubtaskKeys.has(key);
+      }),
+    };
+  }
+
+  function markTaskStatusChanged(taskId: string) {
+    const activeTimeout = statusPulseTimeoutsRef.current.get(taskId);
+
+    if (activeTimeout) {
+      clearTimeout(activeTimeout);
+    }
+
+    setStatusPulseTaskIds((current) => {
+      const next = new Set(current);
+      next.add(taskId);
+      return next;
+    });
+
+    const timeout = setTimeout(() => {
+      statusPulseTimeoutsRef.current.delete(taskId);
+      setStatusPulseTaskIds((current) => {
+        const next = new Set(current);
+        next.delete(taskId);
+        return next;
+      });
+    }, STATUS_PULSE_MS);
+
+    statusPulseTimeoutsRef.current.set(taskId, timeout);
   }
 
   async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
@@ -737,6 +830,7 @@ export function SmartTodoApp() {
     const abortController = new AbortController();
     draftPreviewAbortRef.current = abortController;
     draftGoalRef.current = normalizedGoal;
+    resetDraftMotionState();
     setIsDraftModalOpen(true);
     setDraftModalStatus('loading');
     setIsGenerating(true);
@@ -753,7 +847,11 @@ export function SmartTodoApp() {
         return;
       }
 
-      setDraftPlan(normalizeDraftPlan(generatedDraft));
+      const normalizedDraft = normalizeDraftPlan(generatedDraft);
+      setDraftPlan(normalizedDraft);
+      setDraftSubtaskKeys(
+        normalizedDraft.subtasks.map(() => createDraftSubtaskKey()),
+      );
       setDraftModalStatus('ready');
     } catch (requestError) {
       if (isAbortError(requestError)) {
@@ -826,6 +924,8 @@ export function SmartTodoApp() {
   }
 
   function handleAddDraftSubtask(): void {
+    const subtaskKey = createDraftSubtaskKey();
+
     setDraftPlan((currentDraft) =>
       currentDraft
         ? {
@@ -834,20 +934,55 @@ export function SmartTodoApp() {
           }
         : currentDraft,
     );
+    setDraftSubtaskKeys((currentKeys) => [...currentKeys, subtaskKey]);
     setDraftError(null);
   }
 
   function handleRemoveDraftSubtask(index: number): void {
-    setDraftPlan((currentDraft) =>
-      currentDraft
-        ? {
-            ...currentDraft,
-            subtasks: currentDraft.subtasks.filter(
-              (_subtask, subtaskIndex) => subtaskIndex !== index,
-            ),
-          }
-        : currentDraft,
-    );
+    const subtaskKey = draftSubtaskKeysRef.current[index];
+
+    if (
+      !subtaskKey ||
+      removingDraftSubtaskKeys.has(subtaskKey) ||
+      draftRemovalTimeoutsRef.current.has(subtaskKey)
+    ) {
+      return;
+    }
+
+    setRemovingDraftSubtaskKeys((currentKeys) => {
+      const nextKeys = new Set(currentKeys);
+      nextKeys.add(subtaskKey);
+      return nextKeys;
+    });
+
+    const timeout = setTimeout(() => {
+      const currentIndex = draftSubtaskKeysRef.current.indexOf(subtaskKey);
+
+      if (currentIndex >= 0) {
+        setDraftPlan((currentDraft) =>
+          currentDraft
+            ? {
+                ...currentDraft,
+                subtasks: currentDraft.subtasks.filter(
+                  (_subtask, subtaskIndex) => subtaskIndex !== currentIndex,
+                ),
+              }
+            : currentDraft,
+        );
+        setDraftSubtaskKeys((currentKeys) =>
+          currentKeys.filter((key) => key !== subtaskKey),
+        );
+      }
+
+      draftRemovalTimeoutsRef.current.delete(subtaskKey);
+      setRemovingDraftSubtaskKeys((currentKeys) => {
+        const nextKeys = new Set(currentKeys);
+        nextKeys.delete(subtaskKey);
+        return nextKeys;
+      });
+    }, DRAFT_SUBTASK_EXIT_MS);
+
+    draftRemovalTimeoutsRef.current.set(subtaskKey, timeout);
     setDraftError(null);
   }
 
@@ -862,6 +997,7 @@ export function SmartTodoApp() {
     setIsDraftModalOpen(false);
     setDraftModalStatus('loading');
     setDraftPlan(null);
+    resetDraftMotionState();
     setDraftError(null);
     setDraftPreviewError(null);
     restoreModalReturnFocus();
@@ -872,39 +1008,50 @@ export function SmartTodoApp() {
       return;
     }
 
-    const validationError = getDraftValidationError(draftPlan);
+    const activeDraft = getDraftWithoutRemovingSubtasks(draftPlan);
+    const validationError = getDraftValidationError(activeDraft);
 
     if (validationError) {
       setDraftError(validationError);
       return;
     }
 
-    const normalizedDraft = normalizeDraftPlan(draftPlan);
-    setIsSavingDraft(true);
+    const normalizedDraft = normalizeDraftPlan(activeDraft);
+    setDraftSaveState('saving');
     setDraftError(null);
+    let didSaveDraft = false;
+
     try {
       const generatedTasks = await confirmGeneratedTasks(normalizedDraft);
-      setIsDraftModalOpen(false);
-      setDraftModalStatus('loading');
-      setDraftPlan(null);
-      setDraftPreviewError(null);
-      setGoal('');
-      setActiveFilter('all');
-      setActiveMobileStatus('all');
       await mutate((currentTasks = []) => [...generatedTasks, ...currentTasks], {
         revalidate: false,
       });
       const storyCount = generatedTasks.filter((task) => !task.parentId).length;
       const subtaskCount = generatedTasks.length - storyCount;
+      const successMessage = `Plano salvo com ${storyCount} historia e ${subtaskCount} subtarefas.`;
+
+      didSaveDraft = true;
+      setDraftSaveState('confirmed');
+      await waitForMotion(DRAFT_CONFIRMATION_MS);
+      setIsDraftModalOpen(false);
+      setDraftModalStatus('loading');
+      setDraftPlan(null);
+      resetDraftMotionState();
+      setDraftPreviewError(null);
+      setGoal('');
+      setActiveFilter('all');
+      setActiveMobileStatus('all');
       showToast({
         type: 'success',
-        message: `Plano salvo com ${storyCount} historia e ${subtaskCount} subtarefas.`,
+        message: successMessage,
       });
       restoreModalReturnFocus();
     } catch (requestError) {
       showToast({ type: 'error', message: getErrorMessage(requestError) });
     } finally {
-      setIsSavingDraft(false);
+      if (!didSaveDraft) {
+        setDraftSaveState('idle');
+      }
     }
   }
 
@@ -913,6 +1060,7 @@ export function SmartTodoApp() {
     const nextStatus =
       getTaskStatus(task) === DONE_STATUS ? 'todo' : DONE_STATUS;
     setPending(task.id, true);
+    markTaskStatusChanged(task.id);
 
     await mutate(
       tasks.map((item) =>
@@ -1069,6 +1217,9 @@ export function SmartTodoApp() {
     }
 
     setIsReordering(true);
+    if (getTaskStatus(activeTask) !== targetStatus) {
+      markTaskStatusChanged(activeId);
+    }
     await mutate(nextTasks, { revalidate: false });
 
     try {
@@ -1099,6 +1250,7 @@ export function SmartTodoApp() {
     const orderedIds = nextRootTasks.map((item) => item.id);
 
     setPending(task.id, true);
+    markTaskStatusChanged(task.id);
     await mutate(nextTasks, { revalidate: false });
 
     try {
@@ -1369,7 +1521,9 @@ export function SmartTodoApp() {
                       >
                         {filter.icon}
                         <span>{filter.label}</span>
-                        <strong>{filter.count}</strong>
+                        <strong>
+                          <AnimatedNumber value={filter.count} />
+                        </strong>
                       </button>
                     )}
                   </Tooltip>
@@ -1402,7 +1556,9 @@ export function SmartTodoApp() {
                       >
                         {filter.icon}
                         <span>{filter.label}</span>
-                        <strong>{filter.count}</strong>
+                        <strong>
+                          <AnimatedNumber value={filter.count} />
+                        </strong>
                       </button>
                     )}
                   </Tooltip>
@@ -1484,6 +1640,7 @@ export function SmartTodoApp() {
                         onToggleExpandedTask={handleToggleExpandedTask}
                         onToggle={handleToggleTask}
                         pendingIds={pendingIds}
+                        statusPulseTaskIds={statusPulseTaskIds}
                         tasksByParent={tasksByParent}
                         tasks={filteredTasksByStatus[lane.status]}
                       />
@@ -1521,6 +1678,7 @@ export function SmartTodoApp() {
                       onToggleExpandedTask={handleToggleExpandedTask}
                       onToggle={handleToggleTask}
                       pendingIds={pendingIds}
+                      statusPulseTaskIds={statusPulseTaskIds}
                       tasksByParent={tasksByParent}
                       tasks={mobileFilteredRootTasks}
                     />
@@ -1580,7 +1738,10 @@ export function SmartTodoApp() {
           onStoryChange={handleDraftStoryChange}
           onSubtaskChange={handleDraftSubtaskChange}
           previewError={draftPreviewError}
+          removingSubtaskKeys={removingDraftSubtaskKeys}
+          saveState={draftSaveState}
           status={draftModalStatus}
+          subtaskKeys={draftSubtaskKeys}
         />
       ) : null}
 
@@ -1601,6 +1762,7 @@ function MobileTaskList({
   onToggleExpandedTask,
   onToggle,
   pendingIds,
+  statusPulseTaskIds,
   tasksByParent,
   tasks,
 }: {
@@ -1615,6 +1777,7 @@ function MobileTaskList({
   onToggleExpandedTask: (taskId: string) => void;
   onToggle: (task: Task) => void | Promise<void>;
   pendingIds: Set<string>;
+  statusPulseTaskIds: Set<string>;
   tasksByParent: Map<string, Task[]>;
   tasks: Task[];
 }) {
@@ -1635,6 +1798,7 @@ function MobileTaskList({
           onToggleExpandedTask={onToggleExpandedTask}
           onToggle={onToggle}
           pendingIds={pendingIds}
+          statusPulseTaskIds={statusPulseTaskIds}
           task={task}
           subtasks={tasksByParent.get(task.id) ?? []}
         />
@@ -1656,6 +1820,7 @@ function MobileTaskCard({
   onToggleExpandedTask,
   onToggle,
   pendingIds,
+  statusPulseTaskIds,
   subtasks,
   task,
 }: {
@@ -1671,6 +1836,7 @@ function MobileTaskCard({
   onToggleExpandedTask: (taskId: string) => void;
   onToggle: (task: Task) => void | Promise<void>;
   pendingIds: Set<string>;
+  statusPulseTaskIds: Set<string>;
   subtasks: Task[];
   task: Task;
 }) {
@@ -1691,6 +1857,7 @@ function MobileTaskCard({
     subtasks.length > 0 ? 'has-subtasks' : '',
     isExpanded ? 'expanded' : '',
     status === DONE_STATUS ? 'done' : '',
+    statusPulseTaskIds.has(task.id) ? 'status-just-changed' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -1709,7 +1876,9 @@ function MobileTaskCard({
           {(tooltipId) => (
             <button
               aria-describedby={tooltipId}
-              className="toggle-button"
+              className={
+                status === DONE_STATUS ? 'toggle-button completed' : 'toggle-button'
+              }
               disabled={isPending}
               onClick={() => void onToggle(task)}
               type="button"
@@ -1829,9 +1998,12 @@ function MobileTaskCard({
           <div className="story-progress-row">
             <span>
               <ListChecks size={14} aria-hidden="true" />
-              {completedSubtasks}/{subtasks.length} subtarefas
+              <AnimatedNumber value={completedSubtasks} />/{subtasks.length}{' '}
+              subtarefas
             </span>
-            <strong>{subtaskProgress}%</strong>
+            <strong>
+              <AnimatedNumber suffix="%" value={subtaskProgress} />
+            </strong>
           </div>
           <span className="story-progress-track">
             <span style={{ width: `${subtaskProgress}%` }} />
@@ -1917,7 +2089,11 @@ function MobileTaskCard({
                 return (
                   <li className="subtask-item" key={subtask.id}>
                     <button
-                      className="subtask-check"
+                      className={
+                        subtaskStatus === DONE_STATUS
+                          ? 'subtask-check completed'
+                          : 'subtask-check'
+                      }
                       disabled={pendingIds.has(subtask.id)}
                       onClick={() => void onToggle(subtask)}
                       type="button"
@@ -1967,6 +2143,7 @@ function KanbanLane({
   onToggleExpandedTask,
   onToggle,
   pendingIds,
+  statusPulseTaskIds,
   tasksByParent,
   tasks,
 }: {
@@ -1981,6 +2158,7 @@ function KanbanLane({
   onToggleExpandedTask: (taskId: string) => void;
   onToggle: (task: Task) => void | Promise<void>;
   pendingIds: Set<string>;
+  statusPulseTaskIds: Set<string>;
   tasksByParent: Map<string, Task[]>;
   tasks: Task[];
 }) {
@@ -2024,6 +2202,7 @@ function KanbanLane({
               onToggleExpandedTask={onToggleExpandedTask}
               onToggle={onToggle}
               pendingIds={pendingIds}
+              statusPulseTaskIds={statusPulseTaskIds}
               task={task}
               subtasks={tasksByParent.get(task.id) ?? []}
               isExpanded={expandedTaskIds.has(task.id)}
@@ -2047,6 +2226,7 @@ function SortableTaskCard({
   onToggleExpandedTask,
   onToggle,
   pendingIds,
+  statusPulseTaskIds,
   subtasks,
   task,
 }: {
@@ -2061,6 +2241,7 @@ function SortableTaskCard({
   onToggleExpandedTask: (taskId: string) => void;
   onToggle: (task: Task) => void | Promise<void>;
   pendingIds: Set<string>;
+  statusPulseTaskIds: Set<string>;
   subtasks: Task[];
   task: Task;
 }) {
@@ -2095,6 +2276,7 @@ function SortableTaskCard({
     isExpanded ? 'expanded' : '',
     status === DONE_STATUS ? 'done' : '',
     isDragging ? 'dragging' : '',
+    statusPulseTaskIds.has(task.id) ? 'status-just-changed' : '',
   ]
     .filter(Boolean)
     .join(' ');
@@ -2134,7 +2316,11 @@ function SortableTaskCard({
             {(tooltipId) => (
               <button
                 aria-describedby={tooltipId}
-                className="toggle-button"
+                className={
+                  status === DONE_STATUS
+                    ? 'toggle-button completed'
+                    : 'toggle-button'
+                }
                 disabled={isPending}
                 onClick={() => void onToggle(task)}
                 type="button"
@@ -2221,13 +2407,19 @@ function SortableTaskCard({
       </div>
 
       {subtasks.length > 0 ? (
-        <div className="story-progress" aria-label={`${completedSubtasks} de ${subtasks.length} subtarefas concluidas`}>
+        <div
+          className="story-progress"
+          aria-label={`${completedSubtasks} de ${subtasks.length} subtarefas concluidas`}
+        >
           <div className="story-progress-row">
             <span>
               <ListChecks size={14} aria-hidden="true" />
-              {completedSubtasks}/{subtasks.length} subtarefas
+              <AnimatedNumber value={completedSubtasks} />/{subtasks.length}{' '}
+              subtarefas
             </span>
-            <strong>{subtaskProgress}%</strong>
+            <strong>
+              <AnimatedNumber suffix="%" value={subtaskProgress} />
+            </strong>
           </div>
           <span className="story-progress-track">
             <span style={{ width: `${subtaskProgress}%` }} />
@@ -2298,7 +2490,10 @@ function SortableTaskCard({
           </Tooltip>
 
           {isExpanded ? (
-            <ul className="subtask-list" aria-label={`Subtarefas de ${task.title}`}>
+            <ul
+              className="subtask-list"
+              aria-label={`Subtarefas de ${task.title}`}
+            >
               {subtasks.map((subtask) => {
                 const subtaskStatus = getTaskStatus(subtask);
                 const subtaskLabel = subtask.label?.trim();
@@ -2306,7 +2501,11 @@ function SortableTaskCard({
                 return (
                   <li className="subtask-item" key={subtask.id}>
                     <button
-                      className="subtask-check"
+                      className={
+                        subtaskStatus === DONE_STATUS
+                          ? 'subtask-check completed'
+                          : 'subtask-check'
+                      }
                       disabled={pendingIds.has(subtask.id)}
                       onClick={() => void onToggle(subtask)}
                       type="button"
@@ -2329,7 +2528,9 @@ function SortableTaskCard({
                       type="button"
                     >
                       <span>{subtask.title}</span>
-                      <small>{subtaskLabel || TASK_STATUS_LABELS[subtaskStatus]}</small>
+                      <small>
+                        {subtaskLabel || TASK_STATUS_LABELS[subtaskStatus]}
+                      </small>
                     </button>
                   </li>
                 );
@@ -2354,7 +2555,10 @@ function AiDraftModal({
   onStoryChange,
   onSubtaskChange,
   previewError,
+  removingSubtaskKeys,
+  saveState,
   status,
+  subtaskKeys,
 }: {
   draft: AiDraftPlan | null;
   editorError: string | null;
@@ -2371,11 +2575,19 @@ function AiDraftModal({
     value: string,
   ) => void;
   previewError: string | null;
+  removingSubtaskKeys: Set<string>;
+  saveState: DraftSaveState;
   status: AiDraftModalStatus;
+  subtaskKeys: string[];
 }) {
   const dialogTitleId = useId();
   const dialogRef = useRef<HTMLDivElement>(null);
   const isLoading = status === 'loading';
+  const activeSubtaskCount =
+    draft?.subtasks.filter((_subtask, index) => {
+      const subtaskKey = subtaskKeys[index];
+      return !subtaskKey || !removingSubtaskKeys.has(subtaskKey);
+    }).length ?? 0;
   const title =
     status === 'error'
       ? 'Nao foi possivel gerar'
@@ -2484,7 +2696,9 @@ function AiDraftModal({
           </div>
           <div className="draft-modal-header-actions">
             {status === 'ready' && draft ? (
-              <span>{draft.subtasks.length} subtarefas</span>
+              <span>
+                <AnimatedNumber value={activeSubtaskCount} /> subtarefas
+              </span>
             ) : null}
             <button
               aria-label="Fechar rascunho"
@@ -2499,31 +2713,37 @@ function AiDraftModal({
         </div>
 
         <div className="ai-draft-modal-body">
-          {status === 'loading' ? (
-            <AiDraftLoadingState onCancel={onCancel} />
-          ) : null}
+          <div className="draft-state-pane" key={status}>
+            {status === 'loading' ? (
+              <AiDraftLoadingState onCancel={onCancel} />
+            ) : null}
 
-          {status === 'error' ? (
-            <AiDraftErrorState
-              message={previewError ?? 'Nao foi possivel gerar o rascunho.'}
-              onCancel={onCancel}
-              onRetry={onRetry}
-            />
-          ) : null}
+            {status === 'error' ? (
+              <AiDraftErrorState
+                message={previewError ?? 'Nao foi possivel gerar o rascunho.'}
+                onCancel={onCancel}
+                onRetry={onRetry}
+              />
+            ) : null}
 
-          {status === 'ready' && draft ? (
-            <DraftPlanEditor
-              draft={draft}
-              error={editorError}
-              isSaving={isSaving}
-              onAddSubtask={onAddSubtask}
-              onCancel={onCancel}
-              onConfirm={onConfirm}
-              onRemoveSubtask={onRemoveSubtask}
-              onStoryChange={onStoryChange}
-              onSubtaskChange={onSubtaskChange}
-            />
-          ) : null}
+            {status === 'ready' && draft ? (
+              <DraftPlanEditor
+                activeSubtaskCount={activeSubtaskCount}
+                draft={draft}
+                error={editorError}
+                isSaving={isSaving}
+                onAddSubtask={onAddSubtask}
+                onCancel={onCancel}
+                onConfirm={onConfirm}
+                onRemoveSubtask={onRemoveSubtask}
+                onStoryChange={onStoryChange}
+                onSubtaskChange={onSubtaskChange}
+                removingSubtaskKeys={removingSubtaskKeys}
+                saveState={saveState}
+                subtaskKeys={subtaskKeys}
+              />
+            ) : null}
+          </div>
         </div>
       </section>
     </div>
@@ -2805,11 +3025,14 @@ function TaskFormModal({
                 Subtarefas
               </span>
               <strong>
-                {
-                  subtasks.filter(
-                    (subtask) => getTaskStatus(subtask) === DONE_STATUS,
-                  ).length
-                }/{subtasks.length}
+                <AnimatedNumber
+                  value={
+                    subtasks.filter(
+                      (subtask) => getTaskStatus(subtask) === DONE_STATUS,
+                    ).length
+                  }
+                />
+                /{subtasks.length}
               </strong>
             </div>
             <ul className="modal-subtask-list">
@@ -2820,7 +3043,11 @@ function TaskFormModal({
                 return (
                   <li key={subtask.id}>
                     <button
-                      className="subtask-check"
+                      className={
+                        subtaskStatus === DONE_STATUS
+                          ? 'subtask-check completed'
+                          : 'subtask-check'
+                      }
                       disabled={isSubtaskPending || !onToggleSubtask}
                       onClick={() => void onToggleSubtask?.(subtask)}
                       type="button"
@@ -2970,12 +3197,26 @@ function MetricCard({
             {label}
           </span>
           <strong>
-            {value}
-            {suffix}
+            <AnimatedNumber suffix={suffix} value={value} />
           </strong>
         </div>
       )}
     </Tooltip>
+  );
+}
+
+function AnimatedNumber({
+  suffix = '',
+  value,
+}: {
+  suffix?: string;
+  value: number;
+}) {
+  return (
+    <span className="animated-number" key={`${value}${suffix}`}>
+      {value}
+      {suffix}
+    </span>
   );
 }
 
@@ -3024,6 +3265,7 @@ function EmptyState({
 }
 
 function DraftPlanEditor({
+  activeSubtaskCount,
   draft,
   error,
   isSaving,
@@ -3033,7 +3275,11 @@ function DraftPlanEditor({
   onRemoveSubtask,
   onStoryChange,
   onSubtaskChange,
+  removingSubtaskKeys,
+  saveState,
+  subtaskKeys,
 }: {
+  activeSubtaskCount: number;
   draft: AiDraftPlan;
   error: string | null;
   isSaving: boolean;
@@ -3047,10 +3293,15 @@ function DraftPlanEditor({
     field: keyof AiDraftTask,
     value: string,
   ) => void;
+  removingSubtaskKeys: Set<string>;
+  saveState: DraftSaveState;
+  subtaskKeys: string[];
 }) {
   const storyTitleId = useId();
   const storyDescriptionId = useId();
   const storyLabelId = useId();
+  const isConfirmed = saveState === 'confirmed';
+  const isSavingPlan = saveState === 'saving';
 
   return (
     <section className="draft-panel" aria-label="Rascunho do plano">
@@ -3108,7 +3359,7 @@ function DraftPlanEditor({
         <span>Subtarefas</span>
         <button
           className="mini-button"
-          disabled={isSaving || draft.subtasks.length >= AI_DRAFT_MAX_SUBTASKS}
+          disabled={isSaving || activeSubtaskCount >= AI_DRAFT_MAX_SUBTASKS}
           onClick={onAddSubtask}
           type="button"
         >
@@ -3118,16 +3369,22 @@ function DraftPlanEditor({
       </div>
 
       <div className="draft-subtask-list">
-        {draft.subtasks.map((subtask, index) => (
-          <DraftSubtaskEditor
-            index={index}
-            isSaving={isSaving}
-            key={index}
-            onChange={onSubtaskChange}
-            onRemove={onRemoveSubtask}
-            subtask={subtask}
-          />
-        ))}
+        {draft.subtasks.map((subtask, index) => {
+          const subtaskKey = subtaskKeys[index] ?? `draft-subtask-${index}`;
+          const isRemoving = removingSubtaskKeys.has(subtaskKey);
+
+          return (
+            <DraftSubtaskEditor
+              index={index}
+              isRemoving={isRemoving}
+              isSaving={isSaving}
+              key={subtaskKey}
+              onChange={onSubtaskChange}
+              onRemove={onRemoveSubtask}
+              subtask={subtask}
+            />
+          );
+        })}
       </div>
 
       {error ? (
@@ -3148,17 +3405,23 @@ function DraftPlanEditor({
           Cancelar
         </button>
         <button
-          className="button primary"
+          className={isConfirmed ? 'button primary confirmed' : 'button primary'}
           disabled={isSaving}
           onClick={onConfirm}
           type="button"
         >
-          {isSaving ? (
+          {isSavingPlan ? (
             <Loader2 className="spin" size={18} aria-hidden="true" />
+          ) : isConfirmed ? (
+            <CheckCircle2 size={18} aria-hidden="true" />
           ) : (
             <Save size={18} aria-hidden="true" />
           )}
-          {isSaving ? 'Salvando plano...' : 'Salvar plano'}
+          {isSavingPlan
+            ? 'Salvando plano...'
+            : isConfirmed
+              ? 'Plano salvo'
+              : 'Salvar plano'}
         </button>
       </div>
     </section>
@@ -3167,12 +3430,14 @@ function DraftPlanEditor({
 
 function DraftSubtaskEditor({
   index,
+  isRemoving,
   isSaving,
   onChange,
   onRemove,
   subtask,
 }: {
   index: number;
+  isRemoving: boolean;
   isSaving: boolean;
   onChange: (index: number, field: keyof AiDraftTask, value: string) => void;
   onRemove: (index: number) => void;
@@ -3184,13 +3449,19 @@ function DraftSubtaskEditor({
   const itemNumber = index + 1;
 
   return (
-    <section className="draft-subtask-card" aria-label={`Subtarefa ${itemNumber}`}>
+    <section
+      className={
+        isRemoving ? 'draft-subtask-card removing' : 'draft-subtask-card'
+      }
+      aria-label={`Subtarefa ${itemNumber}`}
+      aria-hidden={isRemoving ? 'true' : undefined}
+    >
       <div className="draft-subtask-title-row">
         <strong>#{itemNumber}</strong>
         <button
           aria-label={`Remover subtarefa ${itemNumber}`}
           className="icon-button danger"
-          disabled={isSaving}
+          disabled={isSaving || isRemoving}
           onClick={() => onRemove(index)}
           type="button"
         >
@@ -3204,7 +3475,7 @@ function DraftSubtaskEditor({
           <span>{subtask.title.length}/{TASK_MAX_LENGTH}</span>
         </div>
         <input
-          disabled={isSaving}
+          disabled={isSaving || isRemoving}
           id={titleId}
           maxLength={TASK_MAX_LENGTH}
           onChange={(event) => onChange(index, 'title', event.target.value)}
@@ -3221,7 +3492,7 @@ function DraftSubtaskEditor({
           </span>
         </div>
         <textarea
-          disabled={isSaving}
+          disabled={isSaving || isRemoving}
           id={descriptionId}
           maxLength={TASK_DESCRIPTION_MAX_LENGTH}
           onChange={(event) => onChange(index, 'description', event.target.value)}
@@ -3236,7 +3507,7 @@ function DraftSubtaskEditor({
           <span>{sanitizeDraftText(subtask.label).length}/{TASK_LABEL_MAX_LENGTH}</span>
         </div>
         <input
-          disabled={isSaving}
+          disabled={isSaving || isRemoving}
           id={labelId}
           maxLength={TASK_LABEL_MAX_LENGTH}
           onChange={(event) => onChange(index, 'label', event.target.value)}

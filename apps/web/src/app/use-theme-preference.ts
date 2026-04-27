@@ -4,13 +4,37 @@ import { useSyncExternalStore } from 'react';
 import { THEME_STORAGE_KEY, type Theme } from './theme';
 
 const themeListeners = new Set<() => void>();
+let themeTransitionTimeout: ReturnType<typeof setTimeout> | null = null;
 
 function applyTheme(theme: Theme): void {
   if (typeof document === 'undefined') {
     return;
   }
 
-  document.documentElement.dataset.theme = theme;
+  const root = document.documentElement;
+  const shouldTransition =
+    typeof window !== 'undefined' &&
+    !window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  if (themeTransitionTimeout) {
+    clearTimeout(themeTransitionTimeout);
+    themeTransitionTimeout = null;
+  }
+
+  if (shouldTransition) {
+    root.classList.add('theme-transitioning');
+  }
+
+  root.dataset.theme = theme;
+
+  if (shouldTransition) {
+    themeTransitionTimeout = setTimeout(() => {
+      root.classList.remove('theme-transitioning');
+      themeTransitionTimeout = null;
+    }, 220);
+  } else {
+    root.classList.remove('theme-transitioning');
+  }
 }
 
 function getThemeSnapshot(): Theme {
