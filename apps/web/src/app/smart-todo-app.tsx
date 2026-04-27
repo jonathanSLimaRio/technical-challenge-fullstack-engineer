@@ -48,15 +48,22 @@ import { io } from 'socket.io-client';
 import useSWR from 'swr';
 import {
   ApiError,
+  confirmGeneratedTasks,
   createTask,
   deleteTask,
   fetchTasks,
-  generateTasks,
   getApiOrigin,
   moveTask,
+  previewTasks,
   updateTask,
 } from '../lib/api';
-import { TASK_STATUSES, type Task, type TaskStatus } from '../types/task';
+import {
+  TASK_STATUSES,
+  type AiDraftPlan,
+  type AiDraftTask,
+  type Task,
+  type TaskStatus,
+} from '../types/task';
 import { ToastViewport, useToastQueue } from './toast';
 import type { Theme } from './theme';
 import { useThemePreference } from './use-theme-preference';
@@ -69,6 +76,7 @@ type TaskLane = {
 };
 
 const GOAL_MAX_LENGTH = 500;
+const AI_DRAFT_MAX_SUBTASKS = 10;
 const TASK_DESCRIPTION_MAX_LENGTH = 1000;
 const TASK_LABEL_MAX_LENGTH = 40;
 const TASK_MAX_LENGTH = 160;
@@ -98,8 +106,8 @@ const tooltipCopy = {
   doneMetric: 'Tarefas já marcadas como concluídas.',
   dragTask: 'Arrastar para mover entre raias ou reordenar a fila.',
   generateTasks:
-    'Criar e salvar tarefas sugeridas pela IA a partir deste objetivo.',
-  goal: 'Descreva um resultado concreto. A IA transforma isso em tarefas salvas.',
+    'Criar um rascunho editavel com tarefas sugeridas pela IA.',
+  goal: 'Descreva um resultado concreto. A IA transforma isso em um rascunho editavel.',
   markDone: 'Marcar esta tarefa como concluída.',
   markPending: 'Mover esta tarefa de volta para pendente.',
   pendingFilter: 'Mostrar apenas tarefas em aberto.',
@@ -371,6 +379,51 @@ function getNormalizedTaskInput(
   };
 }
 
+function createEmptyDraftSubtask(): AiDraftTask {
+  return {
+    description: null,
+    label: null,
+    title: '',
+  };
+}
+
+function sanitizeDraftText(value: string | null | undefined): string {
+  return value ?? '';
+}
+
+function normalizeDraftTask(task: AiDraftTask): AiDraftTask {
+  return {
+    description: sanitizeDraftText(task.description).trim() || null,
+    label: sanitizeDraftText(task.label).trim().replace(/\s+/g, ' ') || null,
+    title: task.title.trim().replace(/\s+/g, ' '),
+  };
+}
+
+function normalizeDraftPlan(plan: AiDraftPlan): AiDraftPlan {
+  return {
+    story: normalizeDraftTask(plan.story),
+    subtasks: plan.subtasks.map((subtask) => normalizeDraftTask(subtask)),
+  };
+}
+
+function getDraftValidationError(plan: AiDraftPlan): string | null {
+  const normalizedPlan = normalizeDraftPlan(plan);
+
+  if (!normalizedPlan.story.title) {
+    return 'Informe o titulo da historia antes de salvar.';
+  }
+
+  if (normalizedPlan.subtasks.length === 0) {
+    return 'Mantenha ao menos uma subtarefa no plano.';
+  }
+
+  if (normalizedPlan.subtasks.some((subtask) => !subtask.title)) {
+    return 'Remova ou preencha subtarefas sem titulo.';
+  }
+
+  return null;
+}
+
 function getTaskPreviewContent(
   task: Task,
   status: TaskStatus,
@@ -408,6 +461,9 @@ export function SmartTodoApp() {
   const [isQuickCaptureOpen, setIsQuickCaptureOpen] = useState(false);
   const [isCreating, setIsCreating] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [draftPlan, setDraftPlan] = useState<AiDraftPlan | null>(null);
+  const [draftError, setDraftError] = useState<string | null>(null);
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
     null,
@@ -666,8 +722,109 @@ export function SmartTodoApp() {
     }
 
     setIsGenerating(true);
+    setDraftError(null);
     try {
-      const generatedTasks = await generateTasks(normalizedGoal);
+      const generatedDraft = await previewTasks(normalizedGoal);
+      setDraftPlan(normalizeDraftPlan(generatedDraft));
+      showToast({
+        type: 'success',
+        message: 'Rascunho gerado para revisao.',
+      });
+    } catch (requestError) {
+      showToast({ type: 'error', message: getErrorMessage(requestError) });
+    } finally {
+      setIsGenerating(false);
+    }
+  }
+
+  function handleDraftStoryChange(
+    field: keyof AiDraftTask,
+    value: string,
+  ): void {
+    setDraftPlan((currentDraft) =>
+      currentDraft
+        ? {
+            ...currentDraft,
+            story: { ...currentDraft.story, [field]: value },
+          }
+        : currentDraft,
+    );
+    setDraftError(null);
+  }
+
+  function handleDraftSubtaskChange(
+    index: number,
+    field: keyof AiDraftTask,
+    value: string,
+  ): void {
+    setDraftPlan((currentDraft) => {
+      if (!currentDraft) {
+        return currentDraft;
+      }
+
+      return {
+        ...currentDraft,
+        subtasks: currentDraft.subtasks.map((subtask, subtaskIndex) =>
+          subtaskIndex === index ? { ...subtask, [field]: value } : subtask,
+        ),
+      };
+    });
+    setDraftError(null);
+  }
+
+  function handleAddDraftSubtask(): void {
+    setDraftPlan((currentDraft) =>
+      currentDraft
+        ? {
+            ...currentDraft,
+            subtasks: [...currentDraft.subtasks, createEmptyDraftSubtask()],
+          }
+        : currentDraft,
+    );
+    setDraftError(null);
+  }
+
+  function handleRemoveDraftSubtask(index: number): void {
+    setDraftPlan((currentDraft) =>
+      currentDraft
+        ? {
+            ...currentDraft,
+            subtasks: currentDraft.subtasks.filter(
+              (_subtask, subtaskIndex) => subtaskIndex !== index,
+            ),
+          }
+        : currentDraft,
+    );
+    setDraftError(null);
+  }
+
+  function handleCancelDraft(): void {
+    if (isSavingDraft) {
+      return;
+    }
+
+    setDraftPlan(null);
+    setDraftError(null);
+  }
+
+  async function handleConfirmDraft(): Promise<void> {
+    if (!draftPlan) {
+      return;
+    }
+
+    const validationError = getDraftValidationError(draftPlan);
+
+    if (validationError) {
+      setDraftError(validationError);
+      return;
+    }
+
+    const normalizedDraft = normalizeDraftPlan(draftPlan);
+    setIsSavingDraft(true);
+    setDraftError(null);
+    try {
+      const generatedTasks = await confirmGeneratedTasks(normalizedDraft);
+      setDraftPlan(null);
       setGoal('');
       setActiveFilter('all');
       setActiveMobileStatus('all');
@@ -678,12 +835,12 @@ export function SmartTodoApp() {
       const subtaskCount = generatedTasks.length - storyCount;
       showToast({
         type: 'success',
-        message: `Plano criado com ${storyCount} historia e ${subtaskCount} subtarefas.`,
+        message: `Plano salvo com ${storyCount} historia e ${subtaskCount} subtarefas.`,
       });
     } catch (requestError) {
       showToast({ type: 'error', message: getErrorMessage(requestError) });
     } finally {
-      setIsGenerating(false);
+      setIsSavingDraft(false);
     }
   }
 
@@ -996,7 +1153,7 @@ export function SmartTodoApp() {
                   <button
                     aria-describedby={tooltipId}
                     className="button primary wide"
-                    disabled={isGenerating || !goal.trim()}
+                    disabled={isGenerating || isSavingDraft || !goal.trim()}
                     type="submit"
                   >
                     {isGenerating ? (
@@ -1004,11 +1161,25 @@ export function SmartTodoApp() {
                     ) : (
                       <Sparkles size={18} aria-hidden="true" />
                     )}
-                    {isGenerating ? 'Gerando plano...' : 'Gerar plano'}
+                    {isGenerating ? 'Gerando rascunho...' : 'Gerar rascunho'}
                   </button>
                 )}
               </Tooltip>
             </form>
+
+            {draftPlan ? (
+              <DraftPlanEditor
+                draft={draftPlan}
+                error={draftError}
+                isSaving={isSavingDraft}
+                onAddSubtask={handleAddDraftSubtask}
+                onCancel={handleCancelDraft}
+                onConfirm={() => void handleConfirmDraft()}
+                onRemoveSubtask={handleRemoveDraftSubtask}
+                onStoryChange={handleDraftStoryChange}
+                onSubtaskChange={handleDraftSubtaskChange}
+              />
+            ) : null}
           </section>
         </aside>
 
@@ -2526,6 +2697,238 @@ function EmptyState({
         </Tooltip>
       ) : null}
     </div>
+  );
+}
+
+function DraftPlanEditor({
+  draft,
+  error,
+  isSaving,
+  onAddSubtask,
+  onCancel,
+  onConfirm,
+  onRemoveSubtask,
+  onStoryChange,
+  onSubtaskChange,
+}: {
+  draft: AiDraftPlan;
+  error: string | null;
+  isSaving: boolean;
+  onAddSubtask: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  onRemoveSubtask: (index: number) => void;
+  onStoryChange: (field: keyof AiDraftTask, value: string) => void;
+  onSubtaskChange: (
+    index: number,
+    field: keyof AiDraftTask,
+    value: string,
+  ) => void;
+}) {
+  const storyTitleId = useId();
+  const storyDescriptionId = useId();
+  const storyLabelId = useId();
+
+  return (
+    <section className="draft-panel" aria-label="Rascunho do plano">
+      <div className="draft-panel-header">
+        <div>
+          <p className="eyebrow">Rascunho da IA</p>
+          <h3>Revise antes de salvar</h3>
+        </div>
+        <span>{draft.subtasks.length} subtarefas</span>
+      </div>
+
+      <div className="draft-card">
+        <div className="field-group">
+          <div className="label-row">
+            <label htmlFor={storyTitleId}>Titulo da historia</label>
+            <span>{draft.story.title.length}/{TASK_MAX_LENGTH}</span>
+          </div>
+          <input
+            disabled={isSaving}
+            id={storyTitleId}
+            maxLength={TASK_MAX_LENGTH}
+            onChange={(event) => onStoryChange('title', event.target.value)}
+            value={draft.story.title}
+          />
+        </div>
+
+        <div className="field-group">
+          <div className="label-row">
+            <label htmlFor={storyDescriptionId}>Descricao</label>
+            <span>
+              {sanitizeDraftText(draft.story.description).length}/
+              {TASK_DESCRIPTION_MAX_LENGTH}
+            </span>
+          </div>
+          <textarea
+            disabled={isSaving}
+            id={storyDescriptionId}
+            maxLength={TASK_DESCRIPTION_MAX_LENGTH}
+            onChange={(event) =>
+              onStoryChange('description', event.target.value)
+            }
+            rows={3}
+            value={sanitizeDraftText(draft.story.description)}
+          />
+        </div>
+
+        <div className="field-group">
+          <div className="label-row">
+            <label htmlFor={storyLabelId}>Etiqueta</label>
+            <span>{sanitizeDraftText(draft.story.label).length}/{TASK_LABEL_MAX_LENGTH}</span>
+          </div>
+          <input
+            disabled={isSaving}
+            id={storyLabelId}
+            maxLength={TASK_LABEL_MAX_LENGTH}
+            onChange={(event) => onStoryChange('label', event.target.value)}
+            value={sanitizeDraftText(draft.story.label)}
+          />
+        </div>
+      </div>
+
+      <div className="draft-subtasks-header">
+        <span>Subtarefas</span>
+        <button
+          className="mini-button"
+          disabled={isSaving || draft.subtasks.length >= AI_DRAFT_MAX_SUBTASKS}
+          onClick={onAddSubtask}
+          type="button"
+        >
+          <Plus size={16} aria-hidden="true" />
+          Adicionar
+        </button>
+      </div>
+
+      <div className="draft-subtask-list">
+        {draft.subtasks.map((subtask, index) => (
+          <DraftSubtaskEditor
+            index={index}
+            isSaving={isSaving}
+            key={index}
+            onChange={onSubtaskChange}
+            onRemove={onRemoveSubtask}
+            subtask={subtask}
+          />
+        ))}
+      </div>
+
+      {error ? (
+        <p className="draft-error" role="alert">
+          <AlertCircle size={16} aria-hidden="true" />
+          {error}
+        </p>
+      ) : null}
+
+      <div className="draft-actions">
+        <button
+          className="button tertiary"
+          disabled={isSaving}
+          onClick={onCancel}
+          type="button"
+        >
+          <X size={18} aria-hidden="true" />
+          Cancelar
+        </button>
+        <button
+          className="button primary"
+          disabled={isSaving}
+          onClick={onConfirm}
+          type="button"
+        >
+          {isSaving ? (
+            <Loader2 className="spin" size={18} aria-hidden="true" />
+          ) : (
+            <Save size={18} aria-hidden="true" />
+          )}
+          {isSaving ? 'Salvando plano...' : 'Salvar plano'}
+        </button>
+      </div>
+    </section>
+  );
+}
+
+function DraftSubtaskEditor({
+  index,
+  isSaving,
+  onChange,
+  onRemove,
+  subtask,
+}: {
+  index: number;
+  isSaving: boolean;
+  onChange: (index: number, field: keyof AiDraftTask, value: string) => void;
+  onRemove: (index: number) => void;
+  subtask: AiDraftTask;
+}) {
+  const titleId = useId();
+  const descriptionId = useId();
+  const labelId = useId();
+  const itemNumber = index + 1;
+
+  return (
+    <section className="draft-subtask-card" aria-label={`Subtarefa ${itemNumber}`}>
+      <div className="draft-subtask-title-row">
+        <strong>#{itemNumber}</strong>
+        <button
+          aria-label={`Remover subtarefa ${itemNumber}`}
+          className="icon-button danger"
+          disabled={isSaving}
+          onClick={() => onRemove(index)}
+          type="button"
+        >
+          <Trash2 size={17} aria-hidden="true" />
+        </button>
+      </div>
+
+      <div className="field-group">
+        <div className="label-row">
+          <label htmlFor={titleId}>Titulo</label>
+          <span>{subtask.title.length}/{TASK_MAX_LENGTH}</span>
+        </div>
+        <input
+          disabled={isSaving}
+          id={titleId}
+          maxLength={TASK_MAX_LENGTH}
+          onChange={(event) => onChange(index, 'title', event.target.value)}
+          value={subtask.title}
+        />
+      </div>
+
+      <div className="field-group">
+        <div className="label-row">
+          <label htmlFor={descriptionId}>Descricao</label>
+          <span>
+            {sanitizeDraftText(subtask.description).length}/
+            {TASK_DESCRIPTION_MAX_LENGTH}
+          </span>
+        </div>
+        <textarea
+          disabled={isSaving}
+          id={descriptionId}
+          maxLength={TASK_DESCRIPTION_MAX_LENGTH}
+          onChange={(event) => onChange(index, 'description', event.target.value)}
+          rows={2}
+          value={sanitizeDraftText(subtask.description)}
+        />
+      </div>
+
+      <div className="field-group">
+        <div className="label-row">
+          <label htmlFor={labelId}>Etiqueta</label>
+          <span>{sanitizeDraftText(subtask.label).length}/{TASK_LABEL_MAX_LENGTH}</span>
+        </div>
+        <input
+          disabled={isSaving}
+          id={labelId}
+          maxLength={TASK_LABEL_MAX_LENGTH}
+          onChange={(event) => onChange(index, 'label', event.target.value)}
+          value={sanitizeDraftText(subtask.label)}
+        />
+      </div>
+    </section>
   );
 }
 

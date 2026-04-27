@@ -1,4 +1,9 @@
-import type { GenerateTasksResponse, Task, TaskStatus } from '../types/task';
+import type {
+  AiDraftPlan,
+  GenerateTasksResponse,
+  Task,
+  TaskStatus,
+} from '../types/task';
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
@@ -129,6 +134,24 @@ export async function generateTasks(goal: string): Promise<Task[]> {
   const response = await request<GenerateTasksResponse>('/tasks/ai-generate', {
     method: 'POST',
     body: JSON.stringify({ goal }),
+  });
+
+  return response.tasks;
+}
+
+export function previewTasks(goal: string): Promise<AiDraftPlan> {
+  return request<AiDraftPlan>('/tasks/ai-preview', {
+    method: 'POST',
+    body: JSON.stringify({ goal }),
+  });
+}
+
+export async function confirmGeneratedTasks(
+  plan: AiDraftPlan,
+): Promise<Task[]> {
+  const response = await request<GenerateTasksResponse>('/tasks/ai-confirm', {
+    method: 'POST',
+    body: JSON.stringify(plan),
   });
 
   return response.tasks;

@@ -20,3 +20,14 @@ export type Task = {
 export type GenerateTasksResponse = {
   tasks: Task[];
 };
+
+export type AiDraftTask = {
+  title: string;
+  description: string | null;
+  label: string | null;
+};
+
+export type AiDraftPlan = {
+  story: AiDraftTask;
+  subtasks: AiDraftTask[];
+};
