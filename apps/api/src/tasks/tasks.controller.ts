@@ -21,6 +21,7 @@ import {
   ApiUnauthorizedResponse,
 } from '@nestjs/swagger';
 import { Throttle } from '@nestjs/throttler';
+import { AiDraftPlanDto } from './dto/ai-draft-plan.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { GenerateTasksDto } from './dto/generate-tasks.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
@@ -120,6 +121,44 @@ export class TasksController {
     @Body() dto: GenerateTasksDto,
   ): Promise<GenerateTasksResponseDto> {
     const tasks = await this.tasksService.generateFromGoal(dto);
+    return { tasks: tasks.map(TaskResponseDto.fromEntity) };
+  }
+
+  @Post('ai-preview')
+  @Throttle({
+    default: {
+      limit: envNumber('AI_THROTTLE_LIMIT', 5),
+      ttl: envNumber('AI_THROTTLE_TTL_MS', 60000),
+    },
+  })
+  @ApiOperation({
+    summary: 'Gera um rascunho editavel de plano sem persistir tarefas',
+  })
+  @ApiCreatedResponse({ type: AiDraftPlanDto })
+  @ApiUnauthorizedResponse({
+    description: 'Chave do provedor invalida ou nao autorizada',
+  })
+  @ApiBadGatewayResponse({
+    description: 'Timeout do provedor ou resposta invalida da IA',
+  })
+  @ApiServiceUnavailableResponse({
+    description: 'Chave da API de IA nao configurada no servidor',
+  })
+  async previewFromGoal(
+    @Body() dto: GenerateTasksDto,
+  ): Promise<AiDraftPlanDto> {
+    return this.tasksService.previewFromGoal(dto);
+  }
+
+  @Post('ai-confirm')
+  @ApiOperation({
+    summary: 'Persiste um rascunho editado de plano gerado por IA',
+  })
+  @ApiCreatedResponse({ type: GenerateTasksResponseDto })
+  async confirmGeneratedPlan(
+    @Body() dto: AiDraftPlanDto,
+  ): Promise<GenerateTasksResponseDto> {
+    const tasks = await this.tasksService.confirmGeneratedPlan(dto);
     return { tasks: tasks.map(TaskResponseDto.fromEntity) };
   }
 }

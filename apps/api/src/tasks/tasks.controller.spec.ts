@@ -22,15 +22,28 @@ type GenerateTasksResponse = {
   tasks: TaskResponse[];
 };
 
+type AiDraftPlanResponse = {
+  story: {
+    description: string | null;
+    label: string | null;
+    title: string;
+  };
+  subtasks: Array<{
+    description: string | null;
+    label: string | null;
+    title: string;
+  }>;
+};
+
 describe('TasksController HTTP', () => {
-  let testApp: Awaited<ReturnType<typeof startTestApp>>;
+  let testApp!: Awaited<ReturnType<typeof startTestApp>>;
 
   beforeAll(async () => {
     testApp = await startTestApp();
   });
 
   afterAll(async () => {
-    await testApp.close();
+    await testApp?.close();
   });
 
   it('handles task CRUD through HTTP', async () => {
@@ -206,6 +219,88 @@ describe('TasksController HTTP', () => {
       }),
       HttpStatus.BAD_REQUEST,
     );
+    await expectStatus(
+      fetch(`${baseUrl}/tasks/ai-preview`, {
+        body: JSON.stringify({
+          apiKey: 'sk-not-accepted',
+          goal: 'Generate a valid plan',
+        }),
+        headers: jsonHeaders(),
+        method: 'POST',
+      }),
+      HttpStatus.BAD_REQUEST,
+    );
+    await expectStatus(
+      fetch(`${baseUrl}/tasks/ai-confirm`, {
+        body: JSON.stringify({
+          story: { description: null, label: null, title: '' },
+          subtasks: [{ description: null, label: null, title: 'Valid step' }],
+        }),
+        headers: jsonHeaders(),
+        method: 'POST',
+      }),
+      HttpStatus.BAD_REQUEST,
+    );
+    await expectStatus(
+      fetch(`${baseUrl}/tasks/ai-confirm`, {
+        body: JSON.stringify({
+          story: { description: null, label: null, title: 'Valid story' },
+          subtasks: [],
+        }),
+        headers: jsonHeaders(),
+        method: 'POST',
+      }),
+      HttpStatus.BAD_REQUEST,
+    );
+    await expectStatus(
+      fetch(`${baseUrl}/tasks/ai-confirm`, {
+        body: JSON.stringify({
+          story: { description: null, label: null, title: 'Valid story' },
+          subtasks: Array.from({ length: 11 }, (_value, index) => ({
+            description: null,
+            label: null,
+            title: `Step ${index}`,
+          })),
+        }),
+        headers: jsonHeaders(),
+        method: 'POST',
+      }),
+      HttpStatus.BAD_REQUEST,
+    );
+  });
+
+  it('previews AI tasks without persisting them', async () => {
+    const { baseUrl } = testApp;
+    const existingTasks = await readJson<TaskResponse[]>(`${baseUrl}/tasks`);
+
+    const response = await fetch(`${baseUrl}/tasks/ai-preview`, {
+      body: JSON.stringify({
+        goal: 'Draft a deterministic review plan',
+      }),
+      headers: jsonHeaders(),
+      method: 'POST',
+    });
+    const payload = (await response.json()) as AiDraftPlanResponse;
+
+    expect(response.status).toBe(HttpStatus.CREATED);
+    expect(payload.story).toMatchObject({
+      description:
+        'Plano gerado para organizar o objetivo em uma historia central e proximos passos claros.',
+      label: 'Plano',
+      title: 'Draft a deterministic review plan',
+    });
+    expect(payload.subtasks).toHaveLength(6);
+    expect(payload.subtasks[0]).toMatchObject({
+      description:
+        'Definir o resultado esperado, os criterios de pronto e o que ficara fora deste plano.',
+      label: 'Planejamento',
+      title:
+        'Esclarecer o resultado desejado para Draft a deterministic review plan',
+    });
+
+    await expect(readJson<TaskResponse[]>(`${baseUrl}/tasks`)).resolves.toHaveLength(
+      existingTasks.length,
+    );
   });
 
   it('generates AI tasks without accepting a request API key', async () => {
@@ -250,6 +345,50 @@ describe('TasksController HTTP', () => {
     expect(
       persistedTasks.every((task) => task.isAiGenerated && task.description && task.label),
     ).toBe(true);
+  });
+
+  it('confirms an edited AI draft and persists generated tasks', async () => {
+    const { baseUrl } = testApp;
+
+    const response = await fetch(`${baseUrl}/tasks/ai-confirm`, {
+      body: JSON.stringify({
+        story: {
+          description: '  Edited story description  ',
+          label: '  Edited   label ',
+          title: '  Edited   story ',
+        },
+        subtasks: [
+          {
+            description: '  Edited subtask description  ',
+            label: '  Delivery ',
+            title: '  Edited   subtask ',
+          },
+        ],
+      }),
+      headers: jsonHeaders(),
+      method: 'POST',
+    });
+    const payload = (await response.json()) as GenerateTasksResponse;
+
+    expect(response.status).toBe(HttpStatus.CREATED);
+    expect(payload.tasks).toHaveLength(2);
+    expect(payload.tasks.every((task) => task.isAiGenerated)).toBe(true);
+    expect(payload.tasks[0]).toMatchObject({
+      description: 'Edited story description',
+      label: 'Edited label',
+      parentId: null,
+      title: 'Edited story',
+    });
+    expect(payload.tasks[1]).toMatchObject({
+      description: 'Edited subtask description',
+      label: 'Delivery',
+      parentId: payload.tasks[0].id,
+      rootId: payload.tasks[0].id,
+      title: 'Edited subtask',
+    });
+
+    const persistedTasks = await readJson<TaskResponse[]>(`${baseUrl}/tasks`);
+    expect(persistedTasks).toEqual(expect.arrayContaining(payload.tasks));
   });
 
   it('returns service unavailable when the server API key is missing in real provider mode', async () => {

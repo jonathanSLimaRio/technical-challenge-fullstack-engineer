@@ -7,6 +7,11 @@ import {
 import { InjectRepository } from '@nestjs/typeorm';
 import { Repository } from 'typeorm';
 import { AiTaskGeneratorService } from '../ai/ai-task-generator.service';
+import {
+  AI_DRAFT_MAX_SUBTASKS,
+  AiDraftPlanDto,
+  AiDraftTaskDto,
+} from './dto/ai-draft-plan.dto';
 import { CreateTaskDto } from './dto/create-task.dto';
 import { GenerateTasksDto } from './dto/generate-tasks.dto';
 import { MoveTaskDto } from './dto/move-task.dto';
@@ -18,7 +23,21 @@ import {
   resolveTaskStatus,
   type TaskStatus,
 } from './task-status';
-import { TasksEventsGateway } from './tasks-events.gateway';
+import {
+  TasksEventsGateway,
+  type TaskChangeAction,
+} from './tasks-events.gateway';
+
+type NormalizedAiDraftTask = {
+  description: string | null;
+  label: string | null;
+  title: string;
+};
+
+type NormalizedAiDraftPlan = {
+  story: NormalizedAiDraftTask;
+  subtasks: NormalizedAiDraftTask[];
+};
 
 @Injectable()
 export class TasksService {
@@ -180,21 +199,44 @@ export class TasksService {
     const generatedPlan = await this.aiTaskGenerator.generateTasks({
       goal: dto.goal,
     });
+    return this.persistGeneratedPlan(generatedPlan, {
+      eventReason: 'generated',
+      logEventName: 'ai_tasks_generated',
+    });
+  }
+
+  async previewFromGoal(dto: GenerateTasksDto): Promise<AiDraftPlanDto> {
+    const generatedPlan = await this.aiTaskGenerator.generateTasks({
+      goal: dto.goal,
+    });
+
+    return this.normalizeDraftPlan(generatedPlan);
+  }
+
+  async confirmGeneratedPlan(dto: AiDraftPlanDto): Promise<Task[]> {
+    return this.persistGeneratedPlan(dto, {
+      eventReason: 'confirmed',
+      logEventName: 'ai_tasks_confirmed',
+    });
+  }
+
+  private async persistGeneratedPlan(
+    plan: AiDraftPlanDto,
+    options: {
+      eventReason: Extract<TaskChangeAction, 'confirmed' | 'generated'>;
+      logEventName: 'ai_tasks_confirmed' | 'ai_tasks_generated';
+    },
+  ): Promise<Task[]> {
+    const generatedPlan = this.normalizeDraftPlan(plan);
     const [storyPosition] = await this.resolveTopPositions(1);
 
     const tasks = await this.tasksRepository.manager.transaction(async (manager) => {
       const story = await manager.save(
         Task,
         this.tasksRepository.create({
-          title: this.normalizeTitle(generatedPlan.story.title),
-          description:
-            generatedPlan.story.description === null
-              ? null
-              : this.normalizeDescription(generatedPlan.story.description),
-          label:
-            generatedPlan.story.label === null
-              ? null
-              : this.normalizeLabel(generatedPlan.story.label),
+          title: generatedPlan.story.title,
+          description: generatedPlan.story.description,
+          label: generatedPlan.story.label,
           parentId: null,
           rootId: null,
           position: storyPosition,
@@ -208,15 +250,9 @@ export class TasksService {
 
       const subtasks = generatedPlan.subtasks.map((generatedTask, index) =>
         this.tasksRepository.create({
-          title: this.normalizeTitle(generatedTask.title),
-          description:
-            generatedTask.description === null
-              ? null
-              : this.normalizeDescription(generatedTask.description),
-          label:
-            generatedTask.label === null
-              ? null
-              : this.normalizeLabel(generatedTask.label),
+          title: generatedTask.title,
+          description: generatedTask.description,
+          label: generatedTask.label,
           parentId: story.id,
           rootId: story.id,
           position: index,
@@ -229,8 +265,8 @@ export class TasksService {
       return manager.save(Task, [story, ...subtasks]);
     });
 
-    this.logEvent('ai_tasks_generated', { count: tasks.length });
-    this.tasksEventsGateway.emitTasksChanged('generated');
+    this.logEvent(options.logEventName, { count: tasks.length });
+    this.tasksEventsGateway.emitTasksChanged(options.eventReason);
 
     return tasks;
   }
@@ -263,6 +299,47 @@ export class TasksService {
   private normalizeLabel(label: string): string | null {
     const normalizedLabel = label.trim().replace(/\s+/g, ' ');
     return normalizedLabel || null;
+  }
+
+  private normalizeDraftPlan(plan: AiDraftPlanDto): NormalizedAiDraftPlan {
+    if (!plan.story) {
+      throw new BadRequestException('O plano precisa ter uma historia.');
+    }
+
+    if (!Array.isArray(plan.subtasks) || plan.subtasks.length === 0) {
+      throw new BadRequestException('O plano precisa ter ao menos uma subtarefa.');
+    }
+
+    if (plan.subtasks.length > AI_DRAFT_MAX_SUBTASKS) {
+      throw new BadRequestException(
+        `O plano pode ter no maximo ${AI_DRAFT_MAX_SUBTASKS} subtarefas.`,
+      );
+    }
+
+    return {
+      story: this.normalizeDraftTask(plan.story),
+      subtasks: plan.subtasks.map((subtask) => this.normalizeDraftTask(subtask)),
+    };
+  }
+
+  private normalizeDraftTask(task: AiDraftTaskDto): NormalizedAiDraftTask {
+    return {
+      description: this.normalizeOptionalDescription(task.description),
+      label: this.normalizeOptionalLabel(task.label),
+      title: this.normalizeTitle(task.title),
+    };
+  }
+
+  private normalizeOptionalDescription(
+    description: string | null | undefined,
+  ): string | null {
+    return description === null || description === undefined
+      ? null
+      : this.normalizeDescription(description);
+  }
+
+  private normalizeOptionalLabel(label: string | null | undefined): string | null {
+    return label === null || label === undefined ? null : this.normalizeLabel(label);
   }
 
   private resolveOrderedRootTasks(orderedIds: string[], tasks: Task[]): Task[] {

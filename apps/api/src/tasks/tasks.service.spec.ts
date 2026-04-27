@@ -296,6 +296,136 @@ describe(TasksService.name, () => {
     expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('generated');
   });
 
+  it('returns an AI draft without persisting tasks', async () => {
+    const { aiTaskGenerator, repository, service, tasks, tasksEventsGateway } =
+      createHarness();
+    aiTaskGenerator.generateTasks.mockResolvedValue({
+      story: {
+        description: '  Draft story context  ',
+        label: '  Draft   ',
+        title: '  Draft   plan  ',
+      },
+      subtasks: [
+        {
+          description: '  First step context  ',
+          label: '  Step   one ',
+          title: '  First   step ',
+        },
+      ],
+    });
+
+    const draft = await service.previewFromGoal({ goal: 'Draft plan' });
+
+    expect(draft).toEqual({
+      story: {
+        description: 'Draft story context',
+        label: 'Draft',
+        title: 'Draft plan',
+      },
+      subtasks: [
+        {
+          description: 'First step context',
+          label: 'Step one',
+          title: 'First step',
+        },
+      ],
+    });
+    expect(tasks).toHaveLength(0);
+    expect(repository.manager.transaction).not.toHaveBeenCalled();
+    expect(tasksEventsGateway.emitTasksChanged).not.toHaveBeenCalled();
+  });
+
+  it('persists an edited AI draft as generated tasks', async () => {
+    const { repository, service, tasksEventsGateway } = createHarness();
+
+    const generatedTasks = await service.confirmGeneratedPlan({
+      story: {
+        description: '  Confirmed story context  ',
+        label: '  Product   ',
+        title: '  Confirmed   plan ',
+      },
+      subtasks: [
+        {
+          description: '  Build the first slice  ',
+          label: '  Delivery ',
+          title: '  Ship   first slice ',
+        },
+        {
+          description: null,
+          label: null,
+          title: 'Review result',
+        },
+      ],
+    });
+
+    expect(generatedTasks).toHaveLength(3);
+    expect(generatedTasks.every((task) => task.isAiGenerated)).toBe(true);
+    expect(generatedTasks[0]).toMatchObject({
+      description: 'Confirmed story context',
+      label: 'Product',
+      parentId: null,
+      title: 'Confirmed plan',
+    });
+    expect(generatedTasks[1]).toMatchObject({
+      description: 'Build the first slice',
+      label: 'Delivery',
+      parentId: generatedTasks[0].id,
+      rootId: generatedTasks[0].id,
+      title: 'Ship first slice',
+    });
+    expect(generatedTasks[2]).toMatchObject({
+      description: null,
+      label: null,
+      parentId: generatedTasks[0].id,
+      rootId: generatedTasks[0].id,
+      title: 'Review result',
+    });
+    expect(repository.manager.transaction).toHaveBeenCalledTimes(1);
+    expect(tasksEventsGateway.emitTasksChanged).toHaveBeenCalledWith('confirmed');
+  });
+
+  it('rejects invalid edited AI drafts before persisting', async () => {
+    const { repository, service, tasks, tasksEventsGateway } = createHarness();
+    const validStory = {
+      description: null,
+      label: null,
+      title: 'Valid story',
+    };
+
+    await expect(
+      service.confirmGeneratedPlan({
+        story: { ...validStory, title: '   ' },
+        subtasks: [{ description: null, label: null, title: 'Valid subtask' }],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.confirmGeneratedPlan({
+        story: validStory,
+        subtasks: [],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.confirmGeneratedPlan({
+        story: validStory,
+        subtasks: [{ description: null, label: null, title: '   ' }],
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    await expect(
+      service.confirmGeneratedPlan({
+        story: validStory,
+        subtasks: Array.from({ length: 11 }, (_value, index) => ({
+          description: null,
+          label: null,
+          title: `Subtask ${index}`,
+        })),
+      }),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(tasks).toHaveLength(0);
+    expect(repository.manager.transaction).not.toHaveBeenCalled();
+    expect(tasksEventsGateway.emitTasksChanged).not.toHaveBeenCalled();
+  });
+
   it('deletes descendants when deleting a parent task', async () => {
     const { service, tasks } = createHarness();
     const parent = await service.create({ title: 'Parent task' });
