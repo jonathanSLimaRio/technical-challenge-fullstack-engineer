@@ -139,9 +139,13 @@ export async function generateTasks(goal: string): Promise<Task[]> {
   return response.tasks;
 }
 
-export function previewTasks(goal: string): Promise<AiDraftPlan> {
+export function previewTasks(
+  goal: string,
+  options: Pick<RequestInit, 'signal'> = {},
+): Promise<AiDraftPlan> {
   return request<AiDraftPlan>('/tasks/ai-preview', {
     method: 'POST',
+    signal: options.signal,
     body: JSON.stringify({ goal }),
   });
 }

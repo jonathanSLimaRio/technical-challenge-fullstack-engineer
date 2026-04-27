@@ -396,6 +396,106 @@ h3 {
   flex-wrap: wrap;
 }
 
+.ai-draft-modal {
+  width: min(760px, 100%);
+  max-height: calc(100vh - 48px);
+  overflow: hidden;
+}
+
+.ai-draft-modal .draft-panel {
+  max-height: calc(100vh - 156px);
+  overflow-y: auto;
+  border: 0;
+  background: transparent;
+  padding: 0 2px 0 0;
+}
+
+.ai-draft-modal .draft-subtask-list {
+  max-height: min(38vh, 390px);
+  overflow-y: auto;
+  padding-right: 2px;
+}
+
+.draft-modal-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.draft-modal-header-actions > span {
+  color: var(--text-secondary);
+  font-size: 0.78rem;
+  font-weight: 820;
+  white-space: nowrap;
+}
+
+.draft-loading-state,
+.draft-error-state {
+  display: grid;
+  gap: 16px;
+}
+
+.draft-loading-copy {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  color: var(--text-secondary);
+  font-size: 0.92rem;
+  font-weight: 760;
+}
+
+.draft-loading-copy svg {
+  color: var(--blue);
+}
+
+.draft-skeleton-layout {
+  display: grid;
+  gap: 10px;
+}
+
+.draft-skeleton-card {
+  display: grid;
+  gap: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface-soft);
+  padding: 12px;
+}
+
+.draft-skeleton-card span,
+.draft-skeleton-card strong,
+.draft-skeleton-card p {
+  display: block;
+  margin: 0;
+  border-radius: 999px;
+  background: var(--skeleton-bg);
+  background-size: 200% 100%;
+  animation: shimmer 1.2s ease-in-out infinite;
+}
+
+.draft-skeleton-card span {
+  width: 74px;
+  height: 10px;
+}
+
+.draft-skeleton-card strong {
+  width: min(420px, 78%);
+  height: 18px;
+}
+
+.draft-skeleton-card p {
+  width: 100%;
+  height: 12px;
+}
+
+.draft-skeleton-card p:last-child {
+  width: 68%;
+}
+
+.draft-skeleton-card.story {
+  padding: 14px;
+}
+
 .quick-add-panel {
   display: grid;
   gap: 16px;
@@ -1895,6 +1995,25 @@ textarea:disabled {
 
   .draft-panel {
     padding: 12px;
+  }
+
+  .ai-draft-modal {
+    max-height: calc(100dvh - 28px);
+    overflow-y: auto;
+  }
+
+  .ai-draft-modal .draft-panel {
+    max-height: none;
+    overflow: visible;
+    padding: 0;
+  }
+
+  .ai-draft-modal .draft-subtask-list {
+    max-height: 34vh;
+  }
+
+  .draft-modal-header-actions > span {
+    display: none;
   }
 
   .draft-actions {

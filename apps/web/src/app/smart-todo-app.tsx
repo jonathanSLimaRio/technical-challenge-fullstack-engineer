@@ -70,6 +70,7 @@ import { useThemePreference } from './use-theme-preference';
 
 type TaskFilter = 'all' | 'pending' | 'done' | 'ai';
 type MobileStatusFilter = 'all' | TaskStatus;
+type AiDraftModalStatus = 'error' | 'loading' | 'ready';
 type TaskLane = {
   label: string;
   status: TaskStatus;
@@ -165,6 +166,10 @@ function getErrorMessage(error: unknown): string {
   }
 
   return 'Algo deu errado. Tente novamente.';
+}
+
+function isAbortError(error: unknown): boolean {
+  return error instanceof Error && error.name === 'AbortError';
 }
 
 function getRootTasks(tasks: Task[]): Task[] {
@@ -462,8 +467,14 @@ export function SmartTodoApp() {
   const [isCreating, setIsCreating] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
   const [isSavingDraft, setIsSavingDraft] = useState(false);
+  const [isDraftModalOpen, setIsDraftModalOpen] = useState(false);
+  const [draftModalStatus, setDraftModalStatus] =
+    useState<AiDraftModalStatus>('loading');
   const [draftPlan, setDraftPlan] = useState<AiDraftPlan | null>(null);
   const [draftError, setDraftError] = useState<string | null>(null);
+  const [draftPreviewError, setDraftPreviewError] = useState<string | null>(
+    null,
+  );
   const [pendingIds, setPendingIds] = useState<Set<string>>(() => new Set());
   const [confirmingDeleteId, setConfirmingDeleteId] = useState<string | null>(
     null,
@@ -480,6 +491,8 @@ export function SmartTodoApp() {
   const [isSavingTaskDetails, setIsSavingTaskDetails] = useState(false);
   const [isMobileTaskFlow, setIsMobileTaskFlow] = useState(false);
   const modalReturnFocusRef = useRef<HTMLElement | null>(null);
+  const draftPreviewAbortRef = useRef<AbortController | null>(null);
+  const draftGoalRef = useRef('');
   const [theme, setThemePreference] = useThemePreference();
   const { dismissToast, showToast, toasts } = useToastQueue();
   const sensors = useSensors(
@@ -626,6 +639,12 @@ export function SmartTodoApp() {
   }, [mutate]);
 
   useEffect(() => {
+    return () => {
+      draftPreviewAbortRef.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
     const mediaQuery = window.matchMedia('(max-width: 640px)');
     const handleChange = () => setIsMobileTaskFlow(mediaQuery.matches);
 
@@ -713,6 +732,44 @@ export function SmartTodoApp() {
     restoreModalReturnFocus();
   }
 
+  async function startDraftPreview(normalizedGoal: string): Promise<void> {
+    draftPreviewAbortRef.current?.abort();
+    const abortController = new AbortController();
+    draftPreviewAbortRef.current = abortController;
+    draftGoalRef.current = normalizedGoal;
+    setIsDraftModalOpen(true);
+    setDraftModalStatus('loading');
+    setIsGenerating(true);
+    setDraftPlan(null);
+    setDraftError(null);
+    setDraftPreviewError(null);
+
+    try {
+      const generatedDraft = await previewTasks(normalizedGoal, {
+        signal: abortController.signal,
+      });
+
+      if (abortController.signal.aborted) {
+        return;
+      }
+
+      setDraftPlan(normalizeDraftPlan(generatedDraft));
+      setDraftModalStatus('ready');
+    } catch (requestError) {
+      if (isAbortError(requestError)) {
+        return;
+      }
+
+      setDraftPreviewError(getErrorMessage(requestError));
+      setDraftModalStatus('error');
+    } finally {
+      if (draftPreviewAbortRef.current === abortController) {
+        draftPreviewAbortRef.current = null;
+        setIsGenerating(false);
+      }
+    }
+  }
+
   async function handleGenerateTasks(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -721,20 +778,16 @@ export function SmartTodoApp() {
       return;
     }
 
-    setIsGenerating(true);
-    setDraftError(null);
-    try {
-      const generatedDraft = await previewTasks(normalizedGoal);
-      setDraftPlan(normalizeDraftPlan(generatedDraft));
-      showToast({
-        type: 'success',
-        message: 'Rascunho gerado para revisao.',
-      });
-    } catch (requestError) {
-      showToast({ type: 'error', message: getErrorMessage(requestError) });
-    } finally {
-      setIsGenerating(false);
+    rememberModalReturnFocus();
+    await startDraftPreview(normalizedGoal);
+  }
+
+  function handleRetryDraftPreview(): void {
+    if (!draftGoalRef.current || isGenerating) {
+      return;
     }
+
+    void startDraftPreview(draftGoalRef.current);
   }
 
   function handleDraftStoryChange(
@@ -803,8 +856,15 @@ export function SmartTodoApp() {
       return;
     }
 
+    draftPreviewAbortRef.current?.abort();
+    draftPreviewAbortRef.current = null;
+    setIsGenerating(false);
+    setIsDraftModalOpen(false);
+    setDraftModalStatus('loading');
     setDraftPlan(null);
     setDraftError(null);
+    setDraftPreviewError(null);
+    restoreModalReturnFocus();
   }
 
   async function handleConfirmDraft(): Promise<void> {
@@ -824,7 +884,10 @@ export function SmartTodoApp() {
     setDraftError(null);
     try {
       const generatedTasks = await confirmGeneratedTasks(normalizedDraft);
+      setIsDraftModalOpen(false);
+      setDraftModalStatus('loading');
       setDraftPlan(null);
+      setDraftPreviewError(null);
       setGoal('');
       setActiveFilter('all');
       setActiveMobileStatus('all');
@@ -837,6 +900,7 @@ export function SmartTodoApp() {
         type: 'success',
         message: `Plano salvo com ${storyCount} historia e ${subtaskCount} subtarefas.`,
       });
+      restoreModalReturnFocus();
     } catch (requestError) {
       showToast({ type: 'error', message: getErrorMessage(requestError) });
     } finally {
@@ -1167,19 +1231,6 @@ export function SmartTodoApp() {
               </Tooltip>
             </form>
 
-            {draftPlan ? (
-              <DraftPlanEditor
-                draft={draftPlan}
-                error={draftError}
-                isSaving={isSavingDraft}
-                onAddSubtask={handleAddDraftSubtask}
-                onCancel={handleCancelDraft}
-                onConfirm={() => void handleConfirmDraft()}
-                onRemoveSubtask={handleRemoveDraftSubtask}
-                onStoryChange={handleDraftStoryChange}
-                onSubtaskChange={handleDraftSubtaskChange}
-              />
-            ) : null}
           </section>
         </aside>
 
@@ -1513,6 +1564,23 @@ export function SmartTodoApp() {
           pendingIds={pendingIds}
           subtasks={tasksByParent.get(editingTask.id) ?? []}
           title={editTitle}
+        />
+      ) : null}
+
+      {isDraftModalOpen ? (
+        <AiDraftModal
+          draft={draftPlan}
+          editorError={draftError}
+          isSaving={isSavingDraft}
+          onAddSubtask={handleAddDraftSubtask}
+          onCancel={handleCancelDraft}
+          onConfirm={() => void handleConfirmDraft()}
+          onRemoveSubtask={handleRemoveDraftSubtask}
+          onRetry={handleRetryDraftPreview}
+          onStoryChange={handleDraftStoryChange}
+          onSubtaskChange={handleDraftSubtaskChange}
+          previewError={draftPreviewError}
+          status={draftModalStatus}
         />
       ) : null}
 
@@ -2274,6 +2342,271 @@ function SortableTaskCard({
   );
 }
 
+function AiDraftModal({
+  draft,
+  editorError,
+  isSaving,
+  onAddSubtask,
+  onCancel,
+  onConfirm,
+  onRemoveSubtask,
+  onRetry,
+  onStoryChange,
+  onSubtaskChange,
+  previewError,
+  status,
+}: {
+  draft: AiDraftPlan | null;
+  editorError: string | null;
+  isSaving: boolean;
+  onAddSubtask: () => void;
+  onCancel: () => void;
+  onConfirm: () => void;
+  onRemoveSubtask: (index: number) => void;
+  onRetry: () => void;
+  onStoryChange: (field: keyof AiDraftTask, value: string) => void;
+  onSubtaskChange: (
+    index: number,
+    field: keyof AiDraftTask,
+    value: string,
+  ) => void;
+  previewError: string | null;
+  status: AiDraftModalStatus;
+}) {
+  const dialogTitleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const isLoading = status === 'loading';
+  const title =
+    status === 'error'
+      ? 'Nao foi possivel gerar'
+      : isLoading
+        ? 'Gerando rascunho'
+        : 'Revise antes de salvar';
+  const eyebrow =
+    status === 'error'
+      ? 'Rascunho interrompido'
+      : isLoading
+        ? 'Rascunho da IA'
+        : 'Rascunho da IA';
+
+  useEffect(() => {
+    const focusableElement = dialogRef.current?.querySelector<HTMLElement>(
+      [
+        'input:not([disabled])',
+        'button:not([disabled])',
+        'select:not([disabled])',
+        'textarea:not([disabled])',
+        '[href]',
+        '[tabindex]:not([tabindex="-1"])',
+      ].join(','),
+    );
+
+    focusableElement?.focus();
+  }, [status]);
+
+  useEffect(() => {
+    function getFocusableElements() {
+      return Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          [
+            'button:not([disabled])',
+            'input:not([disabled])',
+            'select:not([disabled])',
+            'textarea:not([disabled])',
+            '[href]',
+            '[tabindex]:not([tabindex="-1"])',
+          ].join(','),
+        ) ?? [],
+      ).filter((element) => element.offsetParent !== null);
+    }
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape') {
+        event.preventDefault();
+        onCancel();
+        return;
+      }
+
+      if (event.key !== 'Tab') {
+        return;
+      }
+
+      const focusableElements = getFocusableElements();
+
+      if (focusableElements.length === 0) {
+        event.preventDefault();
+        return;
+      }
+
+      const firstElement = focusableElements[0];
+      const lastElement = focusableElements[focusableElements.length - 1];
+
+      if (event.shiftKey && document.activeElement === firstElement) {
+        event.preventDefault();
+        lastElement.focus();
+        return;
+      }
+
+      if (!event.shiftKey && document.activeElement === lastElement) {
+        event.preventDefault();
+        firstElement.focus();
+      }
+    }
+
+    document.addEventListener('keydown', handleKeyDown);
+
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, [onCancel]);
+
+  return (
+    <div
+      className="modal-backdrop"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onCancel();
+        }
+      }}
+    >
+      <section
+        aria-busy={isLoading}
+        aria-labelledby={dialogTitleId}
+        aria-modal="true"
+        className="task-modal ai-draft-modal"
+        ref={dialogRef}
+        role="dialog"
+      >
+        <div className="modal-header">
+          <div>
+            <p className="eyebrow">{eyebrow}</p>
+            <h2 id={dialogTitleId}>{title}</h2>
+          </div>
+          <div className="draft-modal-header-actions">
+            {status === 'ready' && draft ? (
+              <span>{draft.subtasks.length} subtarefas</span>
+            ) : null}
+            <Tooltip
+              className="tooltip-control tooltip-end"
+              content={
+                isLoading
+                  ? 'Cancelar geracao do rascunho.'
+                  : 'Fechar rascunho da IA.'
+              }
+            >
+              {(tooltipId) => (
+                <button
+                  aria-describedby={tooltipId}
+                  className="icon-button neutral"
+                  disabled={isSaving}
+                  onClick={onCancel}
+                  type="button"
+                >
+                  <X size={18} aria-hidden="true" />
+                  <span className="sr-only">Fechar rascunho</span>
+                </button>
+              )}
+            </Tooltip>
+          </div>
+        </div>
+
+        {status === 'loading' ? (
+          <AiDraftLoadingState onCancel={onCancel} />
+        ) : null}
+
+        {status === 'error' ? (
+          <AiDraftErrorState
+            message={previewError ?? 'Nao foi possivel gerar o rascunho.'}
+            onCancel={onCancel}
+            onRetry={onRetry}
+          />
+        ) : null}
+
+        {status === 'ready' && draft ? (
+          <DraftPlanEditor
+            draft={draft}
+            error={editorError}
+            isSaving={isSaving}
+            onAddSubtask={onAddSubtask}
+            onCancel={onCancel}
+            onConfirm={onConfirm}
+            onRemoveSubtask={onRemoveSubtask}
+            onStoryChange={onStoryChange}
+            onSubtaskChange={onSubtaskChange}
+          />
+        ) : null}
+      </section>
+    </div>
+  );
+}
+
+function AiDraftLoadingState({ onCancel }: { onCancel: () => void }) {
+  return (
+    <div className="draft-loading-state">
+      <div
+        aria-label="Carregando rascunho"
+        className="draft-loading-copy"
+        role="status"
+      >
+        <Sparkles size={18} aria-hidden="true" />
+        <span>Organizando historia e subtarefas editaveis...</span>
+      </div>
+
+      <div className="draft-skeleton-layout" aria-hidden="true">
+        <div className="draft-skeleton-card story">
+          <span />
+          <strong />
+          <p />
+          <p />
+        </div>
+        {Array.from({ length: 3 }, (_item, index) => (
+          <div className="draft-skeleton-card" key={index}>
+            <span />
+            <strong />
+            <p />
+          </div>
+        ))}
+      </div>
+
+      <div className="draft-actions">
+        <button className="button tertiary" onClick={onCancel} type="button">
+          <X size={18} aria-hidden="true" />
+          Cancelar
+        </button>
+      </div>
+    </div>
+  );
+}
+
+function AiDraftErrorState({
+  message,
+  onCancel,
+  onRetry,
+}: {
+  message: string;
+  onCancel: () => void;
+  onRetry: () => void;
+}) {
+  return (
+    <div className="draft-error-state">
+      <p className="draft-error" role="alert">
+        <AlertCircle size={16} aria-hidden="true" />
+        {message}
+      </p>
+      <div className="draft-actions">
+        <button className="button tertiary" onClick={onCancel} type="button">
+          <X size={18} aria-hidden="true" />
+          Cancelar
+        </button>
+        <button className="button primary" onClick={onRetry} type="button">
+          <RefreshCw size={18} aria-hidden="true" />
+          Tentar novamente
+        </button>
+      </div>
+    </div>
+  );
+}
+
 function TaskFormModal({
   description,
   isSaving,
@@ -2731,14 +3064,6 @@ function DraftPlanEditor({
 
   return (
     <section className="draft-panel" aria-label="Rascunho do plano">
-      <div className="draft-panel-header">
-        <div>
-          <p className="eyebrow">Rascunho da IA</p>
-          <h3>Revise antes de salvar</h3>
-        </div>
-        <span>{draft.subtasks.length} subtarefas</span>
-      </div>
-
       <div className="draft-card">
         <div className="field-group">
           <div className="label-row">
