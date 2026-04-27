@@ -14,6 +14,63 @@ const staticMockTaskTitles = new Set([
   'Revisar o progresso e ajustar o plano',
 ]);
 
+test('shows a modal skeleton while generating the AI draft', async ({ page }) => {
+  let markPreviewRequested!: () => void;
+  let releasePreview!: () => void;
+  const previewRequested = new Promise<void>((resolve) => {
+    markPreviewRequested = resolve;
+  });
+  const previewRelease = new Promise<void>((resolve) => {
+    releasePreview = resolve;
+  });
+
+  await page.route(`${apiUrl}/tasks/ai-preview`, async (route) => {
+    markPreviewRequested();
+    await previewRelease;
+    await route.fulfill({
+      json: {
+        story: {
+          description: 'Story draft',
+          label: 'Plano',
+          title: 'Draft story',
+        },
+        subtasks: [
+          {
+            description: 'Subtask draft',
+            label: 'Planejamento',
+            title: 'Draft subtask',
+          },
+        ],
+      },
+      status: 201,
+    });
+  });
+
+  await page.goto('/');
+  await waitForAppReady(page);
+  await page.getByLabel('Objetivo').fill(`E2E skeleton ${Date.now()}`);
+  await page.getByRole('button', { name: 'Gerar rascunho' }).click();
+  await previewRequested;
+
+  const loadingDialog = page.getByRole('dialog', {
+    name: 'Gerando rascunho',
+  });
+  await expect(loadingDialog).toBeVisible();
+  await expect(
+    loadingDialog.getByRole('status', { name: 'Carregando rascunho' }),
+  ).toBeVisible();
+
+  releasePreview();
+
+  const readyDialog = page.getByRole('dialog', {
+    name: 'Revise antes de salvar',
+  });
+  await expect(readyDialog.getByLabel('Rascunho do plano')).toBeVisible();
+  await expect(readyDialog.getByLabel('Titulo da historia')).toHaveValue(
+    'Draft story',
+  );
+});
+
 test('previews, edits and saves structured AI tasks without asking for the provider key', async ({
   page,
   request,
@@ -30,7 +87,10 @@ test('previews, edits and saves structured AI tasks without asking for the provi
     await page.getByLabel('Objetivo').fill(goal);
     await page.getByRole('button', { name: 'Gerar rascunho' }).click();
 
-    const draft = page.getByLabel('Rascunho do plano');
+    const dialog = page.getByRole('dialog', {
+      name: 'Revise antes de salvar',
+    });
+    const draft = dialog.getByLabel('Rascunho do plano');
     await expect(draft).toBeVisible();
     await draft.getByLabel('Titulo da historia').fill(editedStoryTitle);
     await draft
@@ -40,6 +100,7 @@ test('previews, edits and saves structured AI tasks without asking for the provi
     await draft.getByRole('button', { name: 'Remover subtarefa 6' }).click();
     await draft.getByRole('button', { name: 'Salvar plano' }).click();
 
+    await expect(dialog).toHaveCount(0);
     await expect(page.locator('.toast-viewport')).toContainText(
       'Plano salvo com 1 historia e 5 subtarefas.',
     );
@@ -78,8 +139,39 @@ test('previews, edits and saves structured AI tasks without asking for the provi
   }
 });
 
-test('cancels an AI draft without persisting tasks', async ({ page, request }) => {
+test('cancels an AI draft while loading without persisting tasks', async ({
+  page,
+  request,
+}) => {
   const goal = `E2E rascunho cancelado ${Date.now()}`;
+  let releasePreview!: () => void;
+  const previewRelease = new Promise<void>((resolve) => {
+    releasePreview = resolve;
+  });
+  await page.route(`${apiUrl}/tasks/ai-preview`, async (route) => {
+    await previewRelease;
+    try {
+      await route.fulfill({
+        json: {
+          story: {
+            description: 'Cancelled draft',
+            label: 'Plano',
+            title: goal,
+          },
+          subtasks: [
+            {
+              description: 'Cancelled subtask',
+              label: 'Planejamento',
+              title: `Subtask ${goal}`,
+            },
+          ],
+        },
+        status: 201,
+      });
+    } catch {
+      // The browser can abort the request before this mocked response resolves.
+    }
+  });
   await deleteTasksMatching(request, (task) => task.title.includes(goal));
 
   try {
@@ -88,11 +180,15 @@ test('cancels an AI draft without persisting tasks', async ({ page, request }) =
     await page.getByLabel('Objetivo').fill(goal);
     await page.getByRole('button', { name: 'Gerar rascunho' }).click();
 
-    const draft = page.getByLabel('Rascunho do plano');
-    await expect(draft).toBeVisible();
-    await draft.getByRole('button', { name: 'Cancelar' }).click();
+    const dialog = page.getByRole('dialog', { name: 'Gerando rascunho' });
+    await expect(
+      dialog.getByRole('status', { name: 'Carregando rascunho' }),
+    ).toBeVisible();
+    await dialog.getByRole('button', { name: 'Cancelar' }).click();
 
-    await expect(draft).toHaveCount(0);
+    await expect(dialog).toHaveCount(0);
+    releasePreview();
+    await expect(page.getByRole('dialog')).toHaveCount(0);
     const tasksResponse = await request.get(`${apiUrl}/tasks`);
     expect(tasksResponse.ok()).toBe(true);
     const tasks = (await tasksResponse.json()) as TaskResponse[];
@@ -115,7 +211,10 @@ test('shows feedback when AI preview and confirm fail', async ({ page }) => {
   await page.getByLabel('Objetivo').fill(`E2E falha preview ${Date.now()}`);
   await page.getByRole('button', { name: 'Gerar rascunho' }).click();
 
-  await expect(page.locator('.toast-viewport')).toContainText(
+  const errorDialog = page.getByRole('dialog', {
+    name: 'Nao foi possivel gerar',
+  });
+  await expect(errorDialog.getByRole('alert')).toContainText(
     'IA indisponivel para rascunho',
   );
 
@@ -146,15 +245,17 @@ test('shows feedback when AI preview and confirm fail', async ({ page }) => {
     });
   });
 
-  await page.getByLabel('Objetivo').fill(`E2E falha confirm ${Date.now()}`);
-  await page.getByRole('button', { name: 'Gerar rascunho' }).click();
-  await expect(page.getByLabel('Rascunho do plano')).toBeVisible();
-  await page.getByRole('button', { name: 'Salvar plano' }).click();
+  await errorDialog.getByRole('button', { name: 'Tentar novamente' }).click();
+  const draftDialog = page.getByRole('dialog', {
+    name: 'Revise antes de salvar',
+  });
+  await expect(draftDialog.getByLabel('Rascunho do plano')).toBeVisible();
+  await draftDialog.getByRole('button', { name: 'Salvar plano' }).click();
 
   await expect(page.locator('.toast-viewport')).toContainText(
     'Falha ao salvar plano',
   );
-  await expect(page.getByLabel('Rascunho do plano')).toBeVisible();
+  await expect(draftDialog.getByLabel('Rascunho do plano')).toBeVisible();
 });
 
 function isGeneratedByThisTest(task: TaskResponse, goal: string): boolean {
