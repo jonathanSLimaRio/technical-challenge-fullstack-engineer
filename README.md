@@ -126,6 +126,8 @@ The backend will not call any external provider in mock mode.
 - `PATCH /tasks/reorder`: persist the execution queue order
 - `DELETE /tasks/:id`: delete a task
 - `POST /tasks/ai-generate`: generate and persist AI-created tasks
+- `POST /tasks/ai-preview`: generate an editable AI draft without persisting
+- `POST /tasks/ai-confirm`: persist an edited AI draft as generated tasks
 - `GET /health`: API and database healthcheck
 
 Swagger documentation is available at `/docs` when `NODE_ENV !== 'production'`
@@ -146,6 +148,7 @@ npm run test:e2e
 - TypeORM with SQLite was chosen for a fast, idiomatic NestJS implementation with portable persistence. Schema synchronization is opt-in through `TYPEORM_SYNCHRONIZE=true`; production should use explicit migrations.
 - The LLM integration targets Hugging Face Inference Providers through its OpenAI-compatible chat completions router, so compatible providers can still be swapped by changing `LLM_BASE_URL` and `LLM_MODEL`.
 - The AI response is treated as untrusted: the backend requests strict JSON, strips common code fences, validates the shape, deduplicates titles, limits generated tasks, retries transient provider failures once and refuses to persist anything when parsing fails.
+- The main UI previews AI output before persistence so users can edit the story and subtasks, while `POST /tasks/ai-generate` remains available for reviewers and API clients that want the challenge's automatic persist flow.
 - `LLM_PROVIDER=mock` is a deliberate demo and review mode. It proves the AI workflow without requiring secrets, network access or provider credits.
 - Logs use JSON-formatted messages for important events such as task lifecycle changes, AI generation, provider failures, timeouts and invalid AI responses. They avoid API keys, raw prompts and raw provider responses.
 - The provider API key is read from server environment only and is not sent by the browser, stored in SQLite or committed to the repository.
