@@ -63,6 +63,34 @@ describe(LlmChatCompletionClient.name, () => {
     );
   });
 
+  it('prefers a request API key over the server environment key', async () => {
+    const fetchMock = global.fetch as jest.Mock;
+    fetchMock.mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          choices: [{ message: { content: '{"tasks":[]}' } }],
+        }),
+        { status: HttpStatus.OK },
+      ),
+    );
+
+    await expect(
+      client.createJsonCompletion({
+        apiKey: '  hf-request-test  ',
+        messages: [{ role: 'user', content: 'Goal: Plan a trip' }],
+      }),
+    ).resolves.toBe('{"tasks":[]}');
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({
+        headers: expect.objectContaining({
+          Authorization: 'Bearer hf-request-test',
+        }),
+      }),
+    );
+  });
+
   it('uses Hugging Face defaults when base URL and model are not configured', async () => {
     delete process.env.LLM_BASE_URL;
     delete process.env.LLM_MODEL;

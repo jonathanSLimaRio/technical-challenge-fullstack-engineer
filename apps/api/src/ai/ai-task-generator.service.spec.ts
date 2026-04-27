@@ -244,6 +244,31 @@ describe(AiTaskGeneratorService.name, () => {
     });
   });
 
+  it('passes a request API key to the completion client without changing prompts', async () => {
+    client.createJsonCompletion.mockResolvedValue(
+      '{"tasks":[{"title":"Define acceptance criteria"}]}',
+    );
+
+    await service.generateTasks({
+      apiKey: '  hf-request-key  ',
+      goal: 'Ship a feature',
+    });
+
+    expect(client.createJsonCompletion).toHaveBeenCalledWith({
+      apiKey: 'hf-request-key',
+      messages: [
+        expect.objectContaining({
+          role: 'system',
+          content: expect.stringContaining('historia mae'),
+        }),
+        {
+          role: 'user',
+          content: 'Objetivo: Ship a feature',
+        },
+      ],
+    });
+  });
+
   it('generates predictable demo tasks with the mock provider', async () => {
     process.env.LLM_PROVIDER = 'mock';
 

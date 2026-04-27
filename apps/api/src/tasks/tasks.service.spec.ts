@@ -266,10 +266,16 @@ describe(TasksService.name, () => {
     });
 
     const generatedTasks = await service.generateFromGoal({
+      apiKey: 'hf-service-key',
       goal: 'Plan a trip',
     });
 
+    expect(aiTaskGenerator.generateTasks).toHaveBeenCalledWith({
+      apiKey: 'hf-service-key',
+      goal: 'Plan a trip',
+    });
     expect(generatedTasks).toHaveLength(3);
+    expect(JSON.stringify(generatedTasks)).not.toContain('hf-service-key');
     expect(generatedTasks.every((task) => task.isAiGenerated)).toBe(true);
     expect(generatedTasks[0]).toMatchObject({
       description: 'Organize the trip from planning to departure.',
@@ -314,8 +320,15 @@ describe(TasksService.name, () => {
       ],
     });
 
-    const draft = await service.previewFromGoal({ goal: 'Draft plan' });
+    const draft = await service.previewFromGoal({
+      apiKey: 'hf-preview-key',
+      goal: 'Draft plan',
+    });
 
+    expect(aiTaskGenerator.generateTasks).toHaveBeenCalledWith({
+      apiKey: 'hf-preview-key',
+      goal: 'Draft plan',
+    });
     expect(draft).toEqual({
       story: {
         description: 'Draft story context',

@@ -206,6 +206,7 @@ export class TasksService {
   // Gera e persiste imediatamente um plano de tarefas a partir de um objetivo.
   async generateFromGoal(dto: GenerateTasksDto): Promise<Task[]> {
     const generatedPlan = await this.aiTaskGenerator.generateTasks({
+      apiKey: dto.apiKey,
       goal: dto.goal,
     });
     return this.persistGeneratedPlan(generatedPlan, {
@@ -217,6 +218,7 @@ export class TasksService {
   // Gera um rascunho editável de plano sem persistir tarefas.
   async previewFromGoal(dto: GenerateTasksDto): Promise<AiDraftPlanDto> {
     const generatedPlan = await this.aiTaskGenerator.generateTasks({
+      apiKey: dto.apiKey,
       goal: dto.goal,
     });
 

@@ -211,7 +211,7 @@ describe('TasksController HTTP', () => {
     await expectStatus(
       fetch(`${baseUrl}/tasks/ai-generate`, {
         body: JSON.stringify({
-          apiKey: 'sk-not-accepted',
+          apiKey: ['sk-not-valid'],
           goal: 'Generate a valid plan',
         }),
         headers: jsonHeaders(),
@@ -222,7 +222,7 @@ describe('TasksController HTTP', () => {
     await expectStatus(
       fetch(`${baseUrl}/tasks/ai-preview`, {
         body: JSON.stringify({
-          apiKey: 'sk-not-accepted',
+          apiKey: { value: 'sk-not-valid' },
           goal: 'Generate a valid plan',
         }),
         headers: jsonHeaders(),
@@ -303,11 +303,12 @@ describe('TasksController HTTP', () => {
     );
   });
 
-  it('generates AI tasks without accepting a request API key', async () => {
+  it('generates AI tasks while accepting an optional request API key', async () => {
     const { baseUrl } = testApp;
 
     const response = await fetch(`${baseUrl}/tasks/ai-generate`, {
       body: JSON.stringify({
+        apiKey: 'hf-request-key',
         goal: 'Launch a deterministic review plan',
       }),
       headers: jsonHeaders(),

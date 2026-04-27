@@ -15,6 +15,7 @@ export type ChatMessage = {
 };
 
 type CompletionInput = {
+  apiKey?: string;
   messages: ChatMessage[];
 };
 
@@ -46,7 +47,7 @@ export class LlmChatCompletionClient {
   // Solicita uma conclusão JSON e repete uma vez quando a falha é transitória.
   async createJsonCompletion(input: CompletionInput): Promise<string> {
     const maxAttempts = 2;
-    const apiKey = this.providerApiKey();
+    const apiKey = this.providerApiKey(input.apiKey);
     let lastError: HttpException | undefined;
 
     for (let attempt = 1; attempt <= maxAttempts; attempt += 1) {
@@ -124,9 +125,9 @@ export class LlmChatCompletionClient {
     return `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
   }
 
-  // Lê e valida a chave de API do provedor configurada no servidor.
-  private providerApiKey(): string {
-    const apiKey = process.env.LLM_API_KEY?.trim();
+  // Le e valida a chave de API do request ou do servidor.
+  private providerApiKey(requestApiKey: string | undefined): string {
+    const apiKey = requestApiKey?.trim() || process.env.LLM_API_KEY?.trim();
 
     if (!apiKey) {
       throw new ServiceUnavailableException(

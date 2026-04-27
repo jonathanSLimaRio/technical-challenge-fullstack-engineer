@@ -26,6 +26,7 @@ type GeneratedPlan = {
 };
 
 type GenerateTasksInput = {
+  apiKey?: string;
   goal: string;
 };
 
@@ -66,9 +67,8 @@ export class AiTaskGeneratorService {
     }
 
     const messages = this.buildMessages(input.goal);
-    const rawContent = await this.client.createJsonCompletion({
-      messages,
-    });
+    const completionInput = this.buildCompletionInput(messages, input.apiKey);
+    const rawContent = await this.client.createJsonCompletion(completionInput);
 
     const payload = this.parsePayload(rawContent);
     const plan = this.extractPlan(payload, input.goal);
@@ -97,6 +97,18 @@ export class AiTaskGeneratorService {
         content: `Objetivo: ${normalizedGoal}`,
       },
     ];
+  }
+
+  // Inclui a chave do request somente quando ela foi enviada com conteudo.
+  private buildCompletionInput(
+    messages: ChatMessage[],
+    apiKey: string | undefined,
+  ): { apiKey?: string; messages: ChatMessage[] } {
+    const normalizedApiKey = apiKey?.trim();
+
+    return normalizedApiKey
+      ? { apiKey: normalizedApiKey, messages }
+      : { messages };
   }
 
   // Converte a resposta textual da IA em um payload JSON validado no formato esperado.
