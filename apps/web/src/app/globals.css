@@ -397,23 +397,46 @@ h3 {
 }
 
 .ai-draft-modal {
+  grid-template-rows: auto minmax(0, 1fr);
   width: min(760px, 100%);
   max-height: calc(100vh - 48px);
-  overflow: hidden;
+  overflow: visible;
+}
+
+.ai-draft-modal-body {
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding-right: 4px;
+  scrollbar-gutter: stable;
 }
 
 .ai-draft-modal .draft-panel {
-  max-height: calc(100vh - 156px);
-  overflow-y: auto;
   border: 0;
   background: transparent;
-  padding: 0 2px 0 0;
+  padding: 0;
 }
 
-.ai-draft-modal .draft-subtask-list {
-  max-height: min(38vh, 390px);
-  overflow-y: auto;
-  padding-right: 2px;
+.ai-draft-modal .draft-actions {
+  position: sticky;
+  bottom: -1px;
+  z-index: 2;
+  margin-top: 2px;
+  border-top: 1px solid var(--line);
+  background: linear-gradient(
+    180deg,
+    rgba(255, 255, 255, 0),
+    var(--surface) 24%
+  );
+  padding-top: 12px;
+}
+
+[data-theme="dark"] .ai-draft-modal .draft-actions {
+  background: linear-gradient(
+    180deg,
+    rgba(23, 32, 51, 0),
+    var(--surface) 24%
+  );
 }
 
 .draft-modal-header-actions {
@@ -814,6 +837,17 @@ textarea:disabled {
 
 .tooltip-end[data-open="true"] > .tooltip-bubble {
   transform: translateY(0);
+}
+
+.tooltip-below .tooltip-bubble {
+  top: calc(100% + 10px);
+  bottom: auto;
+}
+
+.tooltip-below .tooltip-bubble::after {
+  top: auto;
+  bottom: 100%;
+  transform: translateY(5px) rotate(45deg);
 }
 
 .task-card-preview-trigger .tooltip-bubble {
@@ -1999,17 +2033,11 @@ textarea:disabled {
 
   .ai-draft-modal {
     max-height: calc(100dvh - 28px);
-    overflow-y: auto;
+    overflow: visible;
   }
 
   .ai-draft-modal .draft-panel {
-    max-height: none;
-    overflow: visible;
     padding: 0;
-  }
-
-  .ai-draft-modal .draft-subtask-list {
-    max-height: 34vh;
   }
 
   .draft-modal-header-actions > span {

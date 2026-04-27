@@ -2487,7 +2487,7 @@ function AiDraftModal({
               <span>{draft.subtasks.length} subtarefas</span>
             ) : null}
             <Tooltip
-              className="tooltip-control tooltip-end"
+              className="tooltip-control tooltip-end tooltip-below"
               content={
                 isLoading
                   ? 'Cancelar geracao do rascunho.'
@@ -2510,31 +2510,33 @@ function AiDraftModal({
           </div>
         </div>
 
-        {status === 'loading' ? (
-          <AiDraftLoadingState onCancel={onCancel} />
-        ) : null}
+        <div className="ai-draft-modal-body">
+          {status === 'loading' ? (
+            <AiDraftLoadingState onCancel={onCancel} />
+          ) : null}
 
-        {status === 'error' ? (
-          <AiDraftErrorState
-            message={previewError ?? 'Nao foi possivel gerar o rascunho.'}
-            onCancel={onCancel}
-            onRetry={onRetry}
-          />
-        ) : null}
+          {status === 'error' ? (
+            <AiDraftErrorState
+              message={previewError ?? 'Nao foi possivel gerar o rascunho.'}
+              onCancel={onCancel}
+              onRetry={onRetry}
+            />
+          ) : null}
 
-        {status === 'ready' && draft ? (
-          <DraftPlanEditor
-            draft={draft}
-            error={editorError}
-            isSaving={isSaving}
-            onAddSubtask={onAddSubtask}
-            onCancel={onCancel}
-            onConfirm={onConfirm}
-            onRemoveSubtask={onRemoveSubtask}
-            onStoryChange={onStoryChange}
-            onSubtaskChange={onSubtaskChange}
-          />
-        ) : null}
+          {status === 'ready' && draft ? (
+            <DraftPlanEditor
+              draft={draft}
+              error={editorError}
+              isSaving={isSaving}
+              onAddSubtask={onAddSubtask}
+              onCancel={onCancel}
+              onConfirm={onConfirm}
+              onRemoveSubtask={onRemoveSubtask}
+              onStoryChange={onStoryChange}
+              onSubtaskChange={onSubtaskChange}
+            />
+          ) : null}
+        </div>
       </section>
     </div>
   );
