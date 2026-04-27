@@ -107,3 +107,20 @@ test('switches and persists the selected theme', async ({ page }) => {
   await expect(html).toHaveAttribute('data-theme', 'light');
   await expect(lightButton).toHaveAttribute('aria-pressed', 'true');
 });
+
+test('skips theme transition class when reduced motion is enabled', async ({
+  page,
+}) => {
+  await page.emulateMedia({ reducedMotion: 'reduce' });
+  await page.route(`${apiUrl}/tasks`, async (route) => {
+    await route.fulfill({ json: [] });
+  });
+
+  await page.goto('/');
+
+  const html = page.locator('html');
+  await page.getByRole('button', { exact: true, name: 'Dark' }).click();
+
+  await expect(html).toHaveAttribute('data-theme', 'dark');
+  await expect(html).not.toHaveClass(/theme-transitioning/);
+});

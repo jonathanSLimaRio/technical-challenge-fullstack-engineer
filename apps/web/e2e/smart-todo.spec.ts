@@ -23,6 +23,14 @@ test('creates, completes, filters and deletes a manual task', async ({
   await waitForAppReady(page);
   await createManualTaskFromModal(page, title);
 
+  const createdToast = page
+    .locator('.toast')
+    .filter({ hasText: 'Tarefa criada.' });
+  await expect(createdToast).toBeVisible();
+  await createdToast.locator('.toast-close').click();
+  await expect(createdToast).toHaveClass(/exiting/);
+  await expect(createdToast).toHaveCount(0);
+
   const taskCard = page.locator('.task-card').filter({ hasText: title });
   await expect(taskCard).toBeVisible();
   await expect(page.getByRole('region', { name: 'Raia A Fazer' })).toContainText(

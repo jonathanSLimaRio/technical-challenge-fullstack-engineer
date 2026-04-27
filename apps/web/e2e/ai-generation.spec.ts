@@ -147,6 +147,9 @@ test('previews, edits and saves structured AI tasks without asking for the provi
       .fill(editedSubtaskTitle);
     await draft.getByRole('button', { name: 'Remover subtarefa 6' }).click();
     await draft.getByRole('button', { name: 'Salvar plano' }).click();
+    await expect(
+      draft.getByRole('button', { name: 'Plano salvo' }),
+    ).toBeVisible();
 
     await expect(dialog).toHaveCount(0);
     await expect(page.locator('.toast-viewport')).toContainText(
