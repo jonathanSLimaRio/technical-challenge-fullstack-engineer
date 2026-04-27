@@ -2,6 +2,7 @@ import { INestApplication, ValidationPipe } from '@nestjs/common';
 import { DocumentBuilder, SwaggerModule } from '@nestjs/swagger';
 import helmet from 'helmet';
 
+// Transforma a lista de origens permitidas em valores limpos para o CORS.
 function parseCorsOrigins(value: string | undefined): string[] {
   return (value ?? 'http://localhost:3000')
     .split(',')
@@ -9,6 +10,7 @@ function parseCorsOrigins(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+// Aplica segurança, CORS, validação global e documentação Swagger na aplicação.
 export function configureApp(app: INestApplication): void {
   const isProduction = process.env.NODE_ENV === 'production';
 

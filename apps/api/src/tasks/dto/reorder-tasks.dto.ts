@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { ArrayNotEmpty, ArrayUnique, IsArray, IsUUID } from 'class-validator';
 
+// Define a lista de IDs usada para reordenar tarefas raiz.
 export class ReorderTasksDto {
   @ApiProperty({
     example: [

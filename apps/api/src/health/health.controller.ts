@@ -8,9 +8,11 @@ type HealthResponse = {
   database: 'ok';
 };
 
+// Expõe uma verificação simples de saúde da API e do banco de dados.
 @ApiTags('health')
 @Controller('health')
 export class HealthController {
+  // Recebe a conexão do TypeORM usada para validar o banco.
   constructor(private readonly dataSource: DataSource) {}
 
   @Get()
@@ -24,6 +26,7 @@ export class HealthController {
       },
     },
   })
+  // Confirma que a API responde e que o SQLite aceita uma consulta básica.
   async check(): Promise<HealthResponse> {
     try {
       await this.dataSource.query('SELECT 1');

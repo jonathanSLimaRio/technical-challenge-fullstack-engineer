@@ -16,6 +16,7 @@ type TasksChangedPayload = {
   at: string;
 };
 
+// Transforma a configuração de CORS em uma lista de origens para WebSocket.
 function parseCorsOrigins(value: string | undefined): string[] {
   return (value ?? 'http://localhost:3000')
     .split(',')
@@ -23,6 +24,7 @@ function parseCorsOrigins(value: string | undefined): string[] {
     .filter(Boolean);
 }
 
+// Publica eventos WebSocket quando a lista de tarefas muda.
 @Injectable()
 @WebSocketGateway({
   cors: {
@@ -34,6 +36,7 @@ export class TasksEventsGateway {
   @WebSocketServer()
   private server?: Server;
 
+  // Envia aos clientes conectados a ação que alterou as tarefas.
   emitTasksChanged(action: TaskChangeAction): void {
     this.server?.emit('tasks:changed', {
       action,

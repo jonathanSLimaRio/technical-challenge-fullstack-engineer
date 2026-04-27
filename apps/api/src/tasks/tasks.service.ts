@@ -39,10 +39,12 @@ type NormalizedAiDraftPlan = {
   subtasks: NormalizedAiDraftTask[];
 };
 
+// Centraliza as regras de criação, atualização, ordenação e geração de tarefas.
 @Injectable()
 export class TasksService {
   private readonly logger = new Logger(TasksService.name);
 
+  // Recebe repositório, gerador de IA e gateway usados pelas operações de tarefas.
   constructor(
     @InjectRepository(Task)
     private readonly tasksRepository: Repository<Task>,
@@ -50,12 +52,14 @@ export class TasksService {
     private readonly tasksEventsGateway: TasksEventsGateway,
   ) {}
 
+  // Lista todas as tarefas na ordem persistida para a fila e o quadro.
   async findAll(): Promise<Task[]> {
     return this.tasksRepository.find({
       order: { position: 'ASC', createdAt: 'DESC' },
     });
   }
 
+  // Cria uma tarefa raiz manual ou marcada como gerada por IA.
   async create(
     dto: CreateTaskDto,
     options: { isAiGenerated?: boolean } = {},
@@ -87,6 +91,7 @@ export class TasksService {
     return savedTask;
   }
 
+  // Atualiza campos editáveis e sincroniza status textual com conclusão booleana.
   async update(id: string, dto: UpdateTaskDto): Promise<Task> {
     const task = await this.findOneOrFail(id);
 
@@ -120,6 +125,7 @@ export class TasksService {
     return savedTask;
   }
 
+  // Reordena todas as tarefas raiz de acordo com a lista enviada pelo cliente.
   async reorder(orderedIds: string[]): Promise<Task[]> {
     const tasks = await this.tasksRepository.find();
     const orderedTasks = this.resolveOrderedRootTasks(orderedIds, tasks);
@@ -134,6 +140,7 @@ export class TasksService {
     return this.findAll();
   }
 
+  // Move uma tarefa raiz entre raias do quadro e persiste a nova ordem.
   async move(id: string, dto: MoveTaskDto): Promise<Task[]> {
     const tasks = await this.tasksRepository.find();
     const movingTask = tasks.find((task) => task.id === id);
@@ -180,6 +187,7 @@ export class TasksService {
     return this.findAll();
   }
 
+  // Remove uma tarefa e todas as subtarefas descendentes dela.
   async remove(id: string): Promise<void> {
     const tasks = await this.tasksRepository.find();
     const task = tasks.find((item) => item.id === id);
@@ -195,6 +203,7 @@ export class TasksService {
     this.tasksEventsGateway.emitTasksChanged('deleted');
   }
 
+  // Gera e persiste imediatamente um plano de tarefas a partir de um objetivo.
   async generateFromGoal(dto: GenerateTasksDto): Promise<Task[]> {
     const generatedPlan = await this.aiTaskGenerator.generateTasks({
       goal: dto.goal,
@@ -205,6 +214,7 @@ export class TasksService {
     });
   }
 
+  // Gera um rascunho editável de plano sem persistir tarefas.
   async previewFromGoal(dto: GenerateTasksDto): Promise<AiDraftPlanDto> {
     const generatedPlan = await this.aiTaskGenerator.generateTasks({
       goal: dto.goal,
@@ -213,6 +223,7 @@ export class TasksService {
     return this.normalizeDraftPlan(generatedPlan);
   }
 
+  // Persiste um rascunho de plano revisado pelo usuário.
   async confirmGeneratedPlan(dto: AiDraftPlanDto): Promise<Task[]> {
     return this.persistGeneratedPlan(dto, {
       eventReason: 'confirmed',
@@ -220,6 +231,7 @@ export class TasksService {
     });
   }
 
+  // Salva a história principal e suas subtarefas em uma única transação.
   private async persistGeneratedPlan(
     plan: AiDraftPlanDto,
     options: {
@@ -271,6 +283,7 @@ export class TasksService {
     return tasks;
   }
 
+  // Busca uma tarefa por ID ou lança erro quando ela não existe.
   private async findOneOrFail(id: string): Promise<Task> {
     const task = await this.tasksRepository.findOne({ where: { id } });
 
@@ -281,6 +294,7 @@ export class TasksService {
     return task;
   }
 
+  // Normaliza o título e impede tarefas com título vazio.
   private normalizeTitle(title: string): string {
     const normalizedTitle = title.trim().replace(/\s+/g, ' ');
 
@@ -291,16 +305,19 @@ export class TasksService {
     return normalizedTitle;
   }
 
+  // Normaliza a descrição e converte texto vazio em nulo.
   private normalizeDescription(description: string): string | null {
     const normalizedDescription = description.trim();
     return normalizedDescription || null;
   }
 
+  // Normaliza a etiqueta e converte texto vazio em nulo.
   private normalizeLabel(label: string): string | null {
     const normalizedLabel = label.trim().replace(/\s+/g, ' ');
     return normalizedLabel || null;
   }
 
+  // Valida e normaliza a história e as subtarefas de um plano gerado.
   private normalizeDraftPlan(plan: AiDraftPlanDto): NormalizedAiDraftPlan {
     if (!plan.story) {
       throw new BadRequestException('O plano precisa ter uma historia.');
@@ -322,6 +339,7 @@ export class TasksService {
     };
   }
 
+  // Normaliza uma tarefa individual de um rascunho de IA.
   private normalizeDraftTask(task: AiDraftTaskDto): NormalizedAiDraftTask {
     return {
       description: this.normalizeOptionalDescription(task.description),
@@ -330,6 +348,7 @@ export class TasksService {
     };
   }
 
+  // Trata descrições opcionais sem forçar valor quando o cliente envia nulo.
   private normalizeOptionalDescription(
     description: string | null | undefined,
   ): string | null {
@@ -338,10 +357,12 @@ export class TasksService {
       : this.normalizeDescription(description);
   }
 
+  // Trata etiquetas opcionais sem forçar valor quando o cliente envia nulo.
   private normalizeOptionalLabel(label: string | null | undefined): string | null {
     return label === null || label === undefined ? null : this.normalizeLabel(label);
   }
 
+  // Reconstrói a lista de tarefas raiz na ordem solicitada e valida inconsistências.
   private resolveOrderedRootTasks(orderedIds: string[], tasks: Task[]): Task[] {
     if (new Set(orderedIds).size !== orderedIds.length) {
       throw new BadRequestException(
@@ -373,6 +394,7 @@ export class TasksService {
     });
   }
 
+  // Encontra todos os IDs descendentes de uma tarefa para exclusão em cascata manual.
   private resolveDescendantIds(id: string, tasks: Task[]): string[] {
     const idsToDelete = new Set<string>([id]);
     let changed = true;
@@ -395,6 +417,7 @@ export class TasksService {
     return [...idsToDelete];
   }
 
+  // Aplica a conclusão booleana mantendo o status textual coerente.
   private applyCompletionStatus(task: Task, isCompleted: boolean): void {
     task.status = isCompleted
       ? 'done'
@@ -404,11 +427,13 @@ export class TasksService {
     task.isCompleted = isCompletedStatus(task.status);
   }
 
+  // Aplica um status textual e atualiza o booleano de conclusão correspondente.
   private applyTaskStatus(task: Task, status: TaskStatus): void {
     task.status = status;
     task.isCompleted = isCompletedStatus(status);
   }
 
+  // Calcula posições no topo da lista para inserir novas histórias antes das atuais.
   private async resolveTopPositions(count: number): Promise<number[]> {
     if (count <= 0) {
       return [];
@@ -429,6 +454,7 @@ export class TasksService {
     );
   }
 
+  // Registra eventos relevantes do domínio em formato JSON estruturado.
   private logEvent(event: string, metadata: Record<string, unknown>): void {
     this.logger.log(JSON.stringify({ event, ...metadata }));
   }

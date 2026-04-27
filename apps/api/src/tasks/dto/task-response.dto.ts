@@ -7,6 +7,7 @@ import {
   type TaskStatus,
 } from '../task-status';
 
+// Define o formato público de uma tarefa retornada pela API.
 export class TaskResponseDto {
   @ApiProperty()
   id!: string;
@@ -44,6 +45,7 @@ export class TaskResponseDto {
   @ApiProperty()
   updatedAt!: Date;
 
+  // Converte a entidade persistida para o DTO exposto aos clientes.
   static fromEntity(task: Task): TaskResponseDto {
     const status = resolveTaskStatus(task.status, task.isCompleted);
 
@@ -64,6 +66,7 @@ export class TaskResponseDto {
   }
 }
 
+// Define a resposta de endpoints que retornam tarefas geradas por IA.
 export class GenerateTasksResponseDto {
   @ApiProperty({ type: [TaskResponseDto] })
   tasks!: TaskResponseDto[];

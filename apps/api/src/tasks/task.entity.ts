@@ -7,6 +7,7 @@ import {
 } from 'typeorm';
 import { DEFAULT_TASK_STATUS, type TaskStatus } from './task-status';
 
+// Representa a tarefa persistida no SQLite, incluindo hierarquia e status.
 @Entity({ name: 'tasks' })
 export class Task {
   @PrimaryGeneratedColumn('uuid')

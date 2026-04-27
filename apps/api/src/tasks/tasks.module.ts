@@ -6,6 +6,7 @@ import { TasksController } from './tasks.controller';
 import { TasksEventsGateway } from './tasks-events.gateway';
 import { TasksService } from './tasks.service';
 
+// Reúne controller, serviço, gateway e repositório das tarefas.
 @Module({
   imports: [TypeOrmModule.forFeature([Task]), AiModule],
   controllers: [TasksController],

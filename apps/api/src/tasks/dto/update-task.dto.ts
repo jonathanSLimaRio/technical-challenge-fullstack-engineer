@@ -2,6 +2,7 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsBoolean, IsIn, IsOptional, IsString, Length } from 'class-validator';
 import { TASK_STATUSES, type TaskStatus } from '../task-status';
 
+// Define os campos opcionais aceitos para atualizar uma tarefa.
 export class UpdateTaskDto {
   @ApiPropertyOptional({ example: 'Reservar voos reembolsaveis', maxLength: 160 })
   @IsOptional()

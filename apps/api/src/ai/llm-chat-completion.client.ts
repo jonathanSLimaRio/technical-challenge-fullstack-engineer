@@ -38,10 +38,12 @@ const TRANSIENT_PROVIDER_STATUSES = new Set<number>([
   HttpStatus.GATEWAY_TIMEOUT,
 ]);
 
+// Encapsula a chamada OpenAI-compatible feita ao provedor de LLM.
 @Injectable()
 export class LlmChatCompletionClient {
   private readonly logger = new Logger(LlmChatCompletionClient.name);
 
+  // Solicita uma conclusão JSON e repete uma vez quando a falha é transitória.
   async createJsonCompletion(input: CompletionInput): Promise<string> {
     const maxAttempts = 2;
     const apiKey = this.providerApiKey();
@@ -72,6 +74,7 @@ export class LlmChatCompletionClient {
     );
   }
 
+  // Executa uma única chamada HTTP ao endpoint de chat completions.
   private async createJsonCompletionOnce(
     input: CompletionInput,
     apiKey: string,
@@ -115,11 +118,13 @@ export class LlmChatCompletionClient {
     }
   }
 
+  // Monta a URL final do endpoint de completions a partir da base configurada.
   private completionsUrl(): string {
     const baseUrl = process.env.LLM_BASE_URL ?? DEFAULT_LLM_BASE_URL;
     return `${baseUrl.replace(/\/+$/, '')}/chat/completions`;
   }
 
+  // Lê e valida a chave de API do provedor configurada no servidor.
   private providerApiKey(): string {
     const apiKey = process.env.LLM_API_KEY?.trim();
 
@@ -132,6 +137,7 @@ export class LlmChatCompletionClient {
     return apiKey;
   }
 
+  // Converte uma resposta HTTP malsucedida do provedor em exceção da API.
   private async providerError(response: Response): Promise<HttpException> {
     const message = await this.readProviderMessage(response);
 
@@ -160,6 +166,7 @@ export class LlmChatCompletionClient {
     );
   }
 
+  // Tenta extrair uma mensagem segura de erro enviada pelo provedor.
   private async readProviderMessage(
     response: Response,
   ): Promise<string | undefined> {
@@ -177,6 +184,7 @@ export class LlmChatCompletionClient {
     }
   }
 
+  // Identifica falhas causadas por timeout ou cancelamento da requisição.
   private isAbortError(error: unknown): boolean {
     return (
       error instanceof Error &&
@@ -184,6 +192,7 @@ export class LlmChatCompletionClient {
     );
   }
 
+  // Normaliza qualquer erro interno para uma exceção HTTP esperada pelo NestJS.
   private toHttpException(error: unknown): HttpException {
     if (this.isAbortError(error)) {
       return new GatewayTimeoutException(
@@ -200,6 +209,7 @@ export class LlmChatCompletionClient {
     );
   }
 
+  // Decide se a falha atual permite uma nova tentativa contra o provedor.
   private shouldRetry(error: unknown, exception: HttpException): boolean {
     if (this.isAbortError(error)) {
       return true;
@@ -215,6 +225,7 @@ export class LlmChatCompletionClient {
     );
   }
 
+  // Registra falhas do provedor sem expor prompt, resposta bruta ou chave.
   private logProviderFailure(
     error: unknown,
     exception: HttpException,

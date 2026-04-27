@@ -43,12 +43,15 @@ type AiTasksPayload = {
   tasks?: AiTaskShape[];
 };
 
+// Orquestra a geração de histórias e subtarefas por IA ou pelo provedor mock.
 @Injectable()
 export class AiTaskGeneratorService {
   private readonly logger = new Logger(AiTaskGeneratorService.name);
 
+  // Recebe o cliente responsável por chamar o provedor de linguagem.
   constructor(private readonly client: LlmChatCompletionClient) {}
 
+  // Gera um plano de tarefas a partir de um objetivo informado pelo usuário.
   async generateTasks(input: GenerateTasksInput): Promise<GeneratedPlan> {
     if (
       (process.env.LLM_PROVIDER ?? 'huggingface').toLowerCase() === 'mock'
@@ -79,6 +82,7 @@ export class AiTaskGeneratorService {
     return plan;
   }
 
+  // Monta as mensagens que instruem a IA a retornar apenas JSON válido.
   private buildMessages(goal: string): ChatMessage[] {
     const normalizedGoal = goal.trim().replace(/\s+/g, ' ');
 
@@ -95,6 +99,7 @@ export class AiTaskGeneratorService {
     ];
   }
 
+  // Converte a resposta textual da IA em um payload JSON validado no formato esperado.
   private parsePayload(rawContent: string): AiTasksPayload {
     const normalizedContent = rawContent
       .trim()
@@ -125,6 +130,7 @@ export class AiTaskGeneratorService {
     }
   }
 
+  // Extrai a história principal e as subtarefas de um payload aceito.
   private extractPlan(payload: AiTasksPayload, goal: string): GeneratedPlan {
     const rawSubtasks = Array.isArray(payload.subtasks)
       ? payload.subtasks
@@ -143,6 +149,7 @@ export class AiTaskGeneratorService {
     };
   }
 
+  // Normaliza a história principal ou cria uma história padrão quando ela não vem da IA.
   private extractStory(story: AiTaskShape | undefined, goal: string): GeneratedTask {
     const fallbackTitle =
       this.normalizeTitle(goal).slice(0, TASK_TITLE_MAX_LENGTH) || 'Novo plano';
@@ -177,6 +184,7 @@ export class AiTaskGeneratorService {
     };
   }
 
+  // Filtra, deduplica e normaliza as subtarefas retornadas pela IA.
   private extractTasks(rawTasks: AiTaskShape[]): GeneratedTask[] {
     const seen = new Set<string>();
     const tasks: GeneratedTask[] = [];
@@ -212,6 +220,7 @@ export class AiTaskGeneratorService {
     return tasks;
   }
 
+  // Cria um plano determinístico para demonstrações sem chave de provedor externo.
   private generateMockPlan(goal: string): GeneratedPlan {
     const subject =
       goal.trim().replace(/\s+/g, ' ').slice(0, 80) || 'o objetivo';
@@ -264,10 +273,12 @@ export class AiTaskGeneratorService {
     };
   }
 
+  // Remove espaços excedentes do título gerado ou informado.
   private normalizeTitle(title: string): string {
     return title.trim().replace(/\s+/g, ' ');
   }
 
+  // Normaliza uma descrição opcional e respeita o tamanho máximo aceito.
   private normalizeDescription(description: unknown): string | null {
     if (typeof description !== 'string') {
       return null;
@@ -280,6 +291,7 @@ export class AiTaskGeneratorService {
       : null;
   }
 
+  // Normaliza uma etiqueta opcional e respeita o tamanho máximo aceito.
   private normalizeLabel(label: unknown): string | null {
     if (typeof label !== 'string') {
       return null;
@@ -291,6 +303,7 @@ export class AiTaskGeneratorService {
       : null;
   }
 
+  // Registra respostas inválidas da IA sem armazenar o conteúdo bruto.
   private logInvalidResponse(reason: string): void {
     this.logger.warn(JSON.stringify({ event: 'llm_invalid_response', reason }));
   }

@@ -2,6 +2,7 @@ import { ApiProperty } from '@nestjs/swagger';
 import { ArrayNotEmpty, IsArray, IsIn, IsUUID } from 'class-validator';
 import { TASK_STATUSES, type TaskStatus } from '../task-status';
 
+// Define o status de destino e a nova ordem ao mover uma tarefa no quadro.
 export class MoveTaskDto {
   @ApiProperty({ enum: TASK_STATUSES, example: 'doing' })
   @IsIn(TASK_STATUSES, {

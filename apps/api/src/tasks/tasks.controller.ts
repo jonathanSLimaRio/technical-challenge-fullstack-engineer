@@ -33,16 +33,20 @@ import {
 import { UpdateTaskDto } from './dto/update-task.dto';
 import { TasksService } from './tasks.service';
 
+// Converte variáveis de ambiente numéricas para limites positivos com fallback seguro.
 function envNumber(name: string, fallback: number): number {
   const value = Number(process.env[name]);
   return Number.isFinite(value) && value > 0 ? value : fallback;
 }
 
+// Expõe os endpoints HTTP para gerenciar tarefas e planos gerados por IA.
 @ApiTags('tasks')
 @Controller('tasks')
 export class TasksController {
+  // Recebe o serviço que contém as regras de negócio das tarefas.
   constructor(private readonly tasksService: TasksService) {}
 
+  // Retorna todas as tarefas no formato público da API.
   @Get()
   @ApiOperation({ summary: 'Lista tarefas ordenadas por data de criação' })
   @ApiOkResponse({ type: [TaskResponseDto] })
@@ -51,6 +55,7 @@ export class TasksController {
     return tasks.map(TaskResponseDto.fromEntity);
   }
 
+  // Cria uma tarefa manual a partir dos dados enviados pelo usuário.
   @Post()
   @ApiOperation({ summary: 'Cria uma tarefa manual' })
   @ApiCreatedResponse({ type: TaskResponseDto })
@@ -59,6 +64,7 @@ export class TasksController {
     return TaskResponseDto.fromEntity(task);
   }
 
+  // Reordena a fila de execução das tarefas raiz.
   @Patch('reorder')
   @ApiOperation({ summary: 'Reordena a fila de execucao das tarefas' })
   @ApiOkResponse({ type: [TaskResponseDto] })
@@ -67,6 +73,7 @@ export class TasksController {
     return tasks.map(TaskResponseDto.fromEntity);
   }
 
+  // Move uma tarefa raiz entre status do quadro e atualiza sua posição.
   @Patch(':id/move')
   @ApiOperation({ summary: 'Move uma tarefa entre raias e persiste a ordem' })
   @ApiOkResponse({ type: [TaskResponseDto] })
@@ -78,6 +85,7 @@ export class TasksController {
     return tasks.map(TaskResponseDto.fromEntity);
   }
 
+  // Atualiza os campos editáveis ou o status de uma tarefa existente.
   @Patch(':id')
   @ApiOperation({
     summary: 'Atualiza o título da tarefa ou o status de conclusão',
@@ -91,6 +99,7 @@ export class TasksController {
     return TaskResponseDto.fromEntity(task);
   }
 
+  // Exclui uma tarefa e delega a remoção de subtarefas ao serviço.
   @Delete(':id')
   @HttpCode(HttpStatus.NO_CONTENT)
   @ApiOperation({ summary: 'Exclui uma tarefa' })
@@ -99,6 +108,7 @@ export class TasksController {
     await this.tasksService.remove(id);
   }
 
+  // Gera tarefas por IA e já persiste o plano retornado.
   @Post('ai-generate')
   @Throttle({
     default: {
@@ -124,6 +134,7 @@ export class TasksController {
     return { tasks: tasks.map(TaskResponseDto.fromEntity) };
   }
 
+  // Gera um rascunho editável de IA sem salvar tarefas.
   @Post('ai-preview')
   @Throttle({
     default: {
@@ -150,6 +161,7 @@ export class TasksController {
     return this.tasksService.previewFromGoal(dto);
   }
 
+  // Persiste um plano de IA revisado pelo usuário.
   @Post('ai-confirm')
   @ApiOperation({
     summary: 'Persiste um rascunho editado de plano gerado por IA',

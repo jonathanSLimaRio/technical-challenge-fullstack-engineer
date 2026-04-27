@@ -1,6 +1,7 @@
 import { ApiProperty } from '@nestjs/swagger';
 import { IsOptional, IsString, Length } from 'class-validator';
 
+// Define os dados necessários para criar uma tarefa manual.
 export class CreateTaskDto {
   @ApiProperty({ example: 'Reservar voos', minLength: 1, maxLength: 160 })
   @IsString({ message: 'O título da tarefa deve ser um texto.' })

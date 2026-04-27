@@ -13,6 +13,7 @@ import {
 
 export const AI_DRAFT_MAX_SUBTASKS = 10;
 
+// Define os campos aceitos para uma tarefa dentro de um rascunho de IA.
 export class AiDraftTaskDto {
   @ApiProperty({
     example: 'Planejar viagem para Buenos Aires',
@@ -52,6 +53,7 @@ export class AiDraftTaskDto {
   label?: string | null;
 }
 
+// Define o contrato de um plano de IA com história principal e subtarefas.
 export class AiDraftPlanDto {
   @ApiProperty({ type: AiDraftTaskDto })
   @IsDefined({ message: 'O plano precisa ter uma historia.' })
