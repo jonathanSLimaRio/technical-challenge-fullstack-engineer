@@ -10,6 +10,7 @@ export const metadata: Metadata = {
   },
 };
 
+// Renderiza a estrutura raiz da aplicação e injeta o script inicial de tema.
 export default function RootLayout({
   children,
 }: Readonly<{

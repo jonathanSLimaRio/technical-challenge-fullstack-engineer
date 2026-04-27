@@ -3,6 +3,7 @@
 import { AlertCircle, CheckCircle2, X } from 'lucide-react';
 import { useCallback, useEffect, useRef, useState } from 'react';
 
+// Define o contrato de uma notificação exibida no canto da tela.
 export type ToastMessage = {
   id: number;
   isExiting?: boolean;
@@ -10,15 +11,18 @@ export type ToastMessage = {
   type: 'error' | 'success';
 };
 
+// Define os dados mínimos necessários para criar uma nova notificação.
 type ToastInput = Pick<ToastMessage, 'message' | 'type'>;
 const TOAST_EXIT_MS = 180;
 
+// Controla a fila de notificações, tempos de saída e remoção automática.
 export function useToastQueue(timeoutMs = 4500) {
   const [toasts, setToasts] = useState<ToastMessage[]>([]);
   const nextToastId = useRef(1);
   const timeouts = useRef(new Map<number, ReturnType<typeof setTimeout>>());
   const exitTimeouts = useRef(new Map<number, ReturnType<typeof setTimeout>>());
 
+  // Limpa todos os temporizadores associados a uma notificação.
   const clearToastTimers = useCallback((id: number) => {
     const timeout = timeouts.current.get(id);
     const exitTimeout = exitTimeouts.current.get(id);
@@ -34,6 +38,7 @@ export function useToastQueue(timeoutMs = 4500) {
     }
   }, []);
 
+  // Remove uma notificação da fila depois que a animação termina.
   const removeToast = useCallback(
     (id: number) => {
       clearToastTimers(id);
@@ -44,6 +49,7 @@ export function useToastQueue(timeoutMs = 4500) {
     [clearToastTimers],
   );
 
+  // Marca uma notificação como saindo e agenda sua remoção final.
   const dismissToast = useCallback((id: number) => {
     const timeout = timeouts.current.get(id);
 
@@ -66,6 +72,7 @@ export function useToastQueue(timeoutMs = 4500) {
     exitTimeouts.current.set(id, exitTimeout);
   }, [removeToast]);
 
+  // Adiciona uma nova notificação e limita a fila visível.
   const showToast = useCallback(
     ({ message, type }: ToastInput) => {
       const id = nextToastId.current;
@@ -93,6 +100,7 @@ export function useToastQueue(timeoutMs = 4500) {
     [clearToastTimers, dismissToast, timeoutMs],
   );
 
+  // Cancela temporizadores ativos quando o hook é desmontado.
   useEffect(() => {
     const activeTimeouts = timeouts.current;
     const activeExitTimeouts = exitTimeouts.current;
@@ -108,6 +116,7 @@ export function useToastQueue(timeoutMs = 4500) {
   return { dismissToast, showToast, toasts };
 }
 
+// Renderiza a área acessível onde as notificações aparecem.
 export function ToastViewport({
   onDismiss,
   toasts,

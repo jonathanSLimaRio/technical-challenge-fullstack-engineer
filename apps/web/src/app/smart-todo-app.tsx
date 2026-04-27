@@ -68,10 +68,15 @@ import { ToastViewport, useToastQueue } from './toast';
 import type { Theme } from './theme';
 import { useThemePreference } from './use-theme-preference';
 
+// Define os filtros principais exibidos no painel de tarefas.
 type TaskFilter = 'all' | 'pending' | 'done' | 'ai';
+// Define os filtros compactos usados na visualização móvel.
 type MobileStatusFilter = 'all' | TaskStatus;
+// Define os estados possíveis do modal de rascunho criado por IA.
 type AiDraftModalStatus = 'error' | 'loading' | 'ready';
+// Define os estados do botão de salvamento do rascunho.
 type DraftSaveState = 'confirmed' | 'idle' | 'saving';
+// Define uma raia do quadro com rótulo visual e status associado.
 type TaskLane = {
   label: string;
   status: TaskStatus;
@@ -155,6 +160,7 @@ const describedBy = (
     ? `${existingDescriptionId} ${tooltipId}`
     : tooltipId;
 
+// Formata datas da API para exibição curta em português brasileiro.
 function formatDate(value: string): string {
   return new Intl.DateTimeFormat('pt-BR', {
     day: '2-digit',
@@ -164,6 +170,7 @@ function formatDate(value: string): string {
   }).format(new Date(value));
 }
 
+// Extrai uma mensagem amigável de erros conhecidos ou genéricos.
 function getErrorMessage(error: unknown): string {
   if (error instanceof ApiError || error instanceof Error) {
     return error.message;
@@ -172,20 +179,24 @@ function getErrorMessage(error: unknown): string {
   return 'Algo deu errado. Tente novamente.';
 }
 
+// Identifica cancelamentos de requisição causados por AbortController.
 function isAbortError(error: unknown): boolean {
   return error instanceof Error && error.name === 'AbortError';
 }
 
+// Aguarda a duração de uma animação antes de continuar o fluxo.
 function waitForMotion(ms: number): Promise<void> {
   return new Promise((resolve) => {
     setTimeout(resolve, ms);
   });
 }
 
+// Retorna apenas tarefas raiz, sem subtarefas vinculadas.
 function getRootTasks(tasks: Task[]): Task[] {
   return tasks.filter((task) => !task.parentId);
 }
 
+// Agrupa subtarefas por tarefa pai e ordena cada grupo para renderização.
 function getTasksByParent(tasks: Task[]): Map<string, Task[]> {
   const tasksByParent = new Map<string, Task[]>();
 
@@ -212,6 +223,7 @@ function getTasksByParent(tasks: Task[]): Map<string, Task[]> {
   return tasksByParent;
 }
 
+// Verifica se uma história está concluída considerando suas subtarefas.
 function isStoryComplete(task: Task, subtasks: Task[]): boolean {
   if (subtasks.length === 0) {
     return getTaskStatus(task) === DONE_STATUS;
@@ -220,6 +232,7 @@ function isStoryComplete(task: Task, subtasks: Task[]): boolean {
   return subtasks.every((subtask) => getTaskStatus(subtask) === DONE_STATUS);
 }
 
+// Aplica o filtro principal à lista de histórias raiz.
 function getFilteredRootTasks(
   rootTasks: Task[],
   tasksByParent: Map<string, Task[]>,
@@ -247,6 +260,7 @@ function getFilteredRootTasks(
   return rootTasks;
 }
 
+// Encontra todos os IDs descendentes de uma tarefa para atualizações locais.
 function getDescendantIds(id: string, tasks: Task[]): Set<string> {
   const ids = new Set<string>([id]);
   let changed = true;
@@ -265,12 +279,14 @@ function getDescendantIds(id: string, tasks: Task[]): Set<string> {
   return ids;
 }
 
+// Junta tarefas raiz reordenadas com as demais tarefas já existentes.
 function mergeRootTasks(tasks: Task[], rootTasks: Task[]): Task[] {
   const rootIds = new Set(rootTasks.map((task) => task.id));
 
   return [...rootTasks, ...tasks.filter((task) => !rootIds.has(task.id))];
 }
 
+// Decide quais raias aparecem de acordo com o filtro ativo.
 function getVisibleLanes(filter: TaskFilter): TaskLane[] {
   if (filter === 'pending') {
     return TASK_LANES.filter((lane) => lane.status !== DONE_STATUS);
@@ -283,14 +299,17 @@ function getVisibleLanes(filter: TaskFilter): TaskLane[] {
   return TASK_LANES;
 }
 
+// Resolve o status textual de uma tarefa preservando compatibilidade com conclusão booleana.
 function getTaskStatus(task: Task): TaskStatus {
   return task.status ?? (task.isCompleted ? DONE_STATUS : 'todo');
 }
 
+// Confirma se uma string corresponde a um status de tarefa aceito.
 function isTaskStatus(value: string): value is TaskStatus {
   return TASK_STATUS_SET.has(value);
 }
 
+// Retorna uma cópia da tarefa com status e conclusão sincronizados.
 function withTaskStatus(task: Task, status: TaskStatus): Task {
   return {
     ...task,
@@ -299,6 +318,7 @@ function withTaskStatus(task: Task, status: TaskStatus): Task {
   };
 }
 
+// Agrupa tarefas raiz por status para montar raias e movimentos.
 function getTasksByStatus(tasks: Task[]): Record<TaskStatus, Task[]> {
   const grouped: Record<TaskStatus, Task[]> = {
     blocked: [],
@@ -314,6 +334,7 @@ function getTasksByStatus(tasks: Task[]): Record<TaskStatus, Task[]> {
   return grouped;
 }
 
+// Filtra tarefas raiz para a lista móvel conforme status selecionado.
 function getTasksByMobileStatus(
   rootTasks: Task[],
   filter: MobileStatusFilter,
@@ -325,6 +346,7 @@ function getTasksByMobileStatus(
   return rootTasks.filter((task) => getTaskStatus(task) === filter);
 }
 
+// Descobre o status de destino durante uma operação de arrastar e soltar.
 function getDragTargetStatus(tasks: Task[], overId: string): TaskStatus | null {
   if (isTaskStatus(overId)) {
     return overId;
@@ -334,6 +356,7 @@ function getDragTargetStatus(tasks: Task[], overId: string): TaskStatus | null {
   return task ? getTaskStatus(task) : null;
 }
 
+// Calcula a nova lista local depois de mover uma tarefa no quadro.
 function getMovedTasks(
   tasks: Task[],
   activeId: string,
@@ -382,6 +405,7 @@ function getMovedTasks(
   return TASK_STATUSES.flatMap((status) => grouped[status]);
 }
 
+// Normaliza os campos do formulário manual antes de validar e enviar.
 function getNormalizedTaskInput(
   title: string,
   description: string,
@@ -394,6 +418,7 @@ function getNormalizedTaskInput(
   };
 }
 
+// Cria uma subtarefa vazia para edição dentro do rascunho de IA.
 function createEmptyDraftSubtask(): AiDraftTask {
   return {
     description: null,
@@ -402,10 +427,12 @@ function createEmptyDraftSubtask(): AiDraftTask {
   };
 }
 
+// Converte texto opcional de rascunho em string segura para inputs.
 function sanitizeDraftText(value: string | null | undefined): string {
   return value ?? '';
 }
 
+// Normaliza título, descrição e etiqueta de uma tarefa do rascunho.
 function normalizeDraftTask(task: AiDraftTask): AiDraftTask {
   return {
     description: sanitizeDraftText(task.description).trim() || null,
@@ -414,6 +441,7 @@ function normalizeDraftTask(task: AiDraftTask): AiDraftTask {
   };
 }
 
+// Normaliza história e subtarefas antes de salvar o plano de IA.
 function normalizeDraftPlan(plan: AiDraftPlan): AiDraftPlan {
   return {
     story: normalizeDraftTask(plan.story),
@@ -421,6 +449,7 @@ function normalizeDraftPlan(plan: AiDraftPlan): AiDraftPlan {
   };
 }
 
+// Retorna a primeira mensagem de validação encontrada no rascunho de IA.
 function getDraftValidationError(plan: AiDraftPlan): string | null {
   const normalizedPlan = normalizeDraftPlan(plan);
 
@@ -439,6 +468,7 @@ function getDraftValidationError(plan: AiDraftPlan): string | null {
   return null;
 }
 
+// Monta o conteúdo exibido no tooltip de prévia de uma tarefa.
 function getTaskPreviewContent(
   task: Task,
   status: TaskStatus,
@@ -459,6 +489,7 @@ function getTaskPreviewContent(
   );
 }
 
+// Controla a aplicação principal de tarefas, filtros, IA, modais e sincronização.
 export function SmartTodoApp() {
   const {
     data: tasks = [],
@@ -648,6 +679,8 @@ export function SmartTodoApp() {
     [rootTasks.length, rootTasksByStatus],
   );
 
+  // Mantém a lista local sincronizada com eventos em tempo real da API.
+  // Foca o primeiro controle disponível sempre que o estado do modal muda.
   useEffect(() => {
     const socket = io(getApiOrigin(), {
       reconnectionAttempts: 5,
@@ -665,10 +698,12 @@ export function SmartTodoApp() {
     };
   }, [mutate]);
 
+  // Mantém a referência das chaves de subtarefas atualizada para callbacks assíncronos.
   useEffect(() => {
     draftSubtaskKeysRef.current = draftSubtaskKeys;
   }, [draftSubtaskKeys]);
 
+  // Cancela requisições e temporizadores pendentes ao desmontar a tela.
   useEffect(() => {
     const draftRemovalTimeouts = draftRemovalTimeoutsRef.current;
     const statusPulseTimeouts = statusPulseTimeoutsRef.current;
@@ -682,8 +717,10 @@ export function SmartTodoApp() {
     };
   }, []);
 
+  // Detecta quando o fluxo compacto para dispositivos móveis deve ser usado.
   useEffect(() => {
     const mediaQuery = window.matchMedia('(max-width: 640px)');
+    // Sincroniza o estado responsivo quando a consulta de mídia muda.
     const handleChange = () => setIsMobileTaskFlow(mediaQuery.matches);
 
     handleChange();
@@ -694,6 +731,7 @@ export function SmartTodoApp() {
     };
   }, []);
 
+  // Guarda o elemento ativo antes de abrir um modal para restaurar o foco depois.
   function rememberModalReturnFocus() {
     if (typeof document === 'undefined') {
       return;
@@ -709,6 +747,7 @@ export function SmartTodoApp() {
     }
   }
 
+  // Devolve o foco ao elemento que abriu o modal quando ele ainda existe.
   function restoreModalReturnFocus() {
     const element = modalReturnFocusRef.current;
 
@@ -719,12 +758,14 @@ export function SmartTodoApp() {
     }, 0);
   }
 
+  // Cria uma chave estável para animar e remover subtarefas do rascunho.
   function createDraftSubtaskKey(): string {
     const key = `draft-subtask-${nextDraftSubtaskUiIdRef.current}`;
     nextDraftSubtaskUiIdRef.current += 1;
     return key;
   }
 
+  // Limpa temporizadores de animação de remoção de subtarefas.
   function clearDraftRemovalTimeouts() {
     draftRemovalTimeoutsRef.current.forEach((timeout) =>
       clearTimeout(timeout),
@@ -732,6 +773,7 @@ export function SmartTodoApp() {
     draftRemovalTimeoutsRef.current.clear();
   }
 
+  // Reinicia estados visuais usados pelo modal de rascunho da IA.
   function resetDraftMotionState() {
     clearDraftRemovalTimeouts();
     setDraftSubtaskKeys([]);
@@ -739,6 +781,7 @@ export function SmartTodoApp() {
     setDraftSaveState('idle');
   }
 
+  // Remove subtarefas em animação de saída antes de validar ou salvar o plano.
   function getDraftWithoutRemovingSubtasks(plan: AiDraftPlan): AiDraftPlan {
     return {
       ...plan,
@@ -749,6 +792,7 @@ export function SmartTodoApp() {
     };
   }
 
+  // Aciona um pulso visual temporário para tarefas que mudaram de status.
   function markTaskStatusChanged(taskId: string) {
     const activeTimeout = statusPulseTimeoutsRef.current.get(taskId);
 
@@ -774,6 +818,7 @@ export function SmartTodoApp() {
     statusPulseTimeoutsRef.current.set(taskId, timeout);
   }
 
+  // Envia o formulário de criação manual e atualiza a lista de forma otimista.
   async function handleCreateTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -808,6 +853,7 @@ export function SmartTodoApp() {
     }
   }
 
+  // Abre o modal de captura rápida com campos limpos.
   function handleOpenQuickCapture() {
     rememberModalReturnFocus();
     setManualTitle('');
@@ -816,6 +862,7 @@ export function SmartTodoApp() {
     setIsQuickCaptureOpen(true);
   }
 
+  // Fecha o modal de captura rápida quando não há criação em andamento.
   function handleCloseQuickCapture() {
     if (isCreating) {
       return;
@@ -825,6 +872,7 @@ export function SmartTodoApp() {
     restoreModalReturnFocus();
   }
 
+  // Solicita à API um rascunho de IA para o objetivo já normalizado.
   async function startDraftPreview(normalizedGoal: string): Promise<void> {
     draftPreviewAbortRef.current?.abort();
     const abortController = new AbortController();
@@ -868,6 +916,7 @@ export function SmartTodoApp() {
     }
   }
 
+  // Inicia a geração de rascunho a partir do formulário de objetivo.
   async function handleGenerateTasks(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -880,6 +929,7 @@ export function SmartTodoApp() {
     await startDraftPreview(normalizedGoal);
   }
 
+  // Tenta gerar novamente o último rascunho solicitado quando houve erro.
   function handleRetryDraftPreview(): void {
     if (!draftGoalRef.current || isGenerating) {
       return;
@@ -888,6 +938,7 @@ export function SmartTodoApp() {
     void startDraftPreview(draftGoalRef.current);
   }
 
+  // Atualiza um campo da história principal no rascunho editável.
   function handleDraftStoryChange(
     field: keyof AiDraftTask,
     value: string,
@@ -903,6 +954,7 @@ export function SmartTodoApp() {
     setDraftError(null);
   }
 
+  // Atualiza um campo de uma subtarefa específica no rascunho editável.
   function handleDraftSubtaskChange(
     index: number,
     field: keyof AiDraftTask,
@@ -923,6 +975,7 @@ export function SmartTodoApp() {
     setDraftError(null);
   }
 
+  // Adiciona uma nova subtarefa vazia ao rascunho de IA.
   function handleAddDraftSubtask(): void {
     const subtaskKey = createDraftSubtaskKey();
 
@@ -938,6 +991,7 @@ export function SmartTodoApp() {
     setDraftError(null);
   }
 
+  // Marca uma subtarefa para remoção e aguarda a animação antes de excluí-la.
   function handleRemoveDraftSubtask(index: number): void {
     const subtaskKey = draftSubtaskKeysRef.current[index];
 
@@ -986,6 +1040,7 @@ export function SmartTodoApp() {
     setDraftError(null);
   }
 
+  // Cancela o modal de rascunho, abortando requisições e limpando estados.
   function handleCancelDraft(): void {
     if (isSavingDraft) {
       return;
@@ -1003,6 +1058,7 @@ export function SmartTodoApp() {
     restoreModalReturnFocus();
   }
 
+  // Valida, confirma e persiste o rascunho de IA editado pelo usuário.
   async function handleConfirmDraft(): Promise<void> {
     if (!draftPlan) {
       return;
@@ -1055,6 +1111,7 @@ export function SmartTodoApp() {
     }
   }
 
+  // Alterna a conclusão de uma tarefa com atualização otimista.
   async function handleToggleTask(task: Task) {
     const previousTasks = tasks;
     const nextStatus =
@@ -1090,6 +1147,7 @@ export function SmartTodoApp() {
     }
   }
 
+  // Exclui uma tarefa e remove seus descendentes da lista local de forma otimista.
   async function handleDeleteTask(task: Task) {
     const previousTasks = tasks;
     const idsToDelete = getDescendantIds(task.id, tasks);
@@ -1112,6 +1170,7 @@ export function SmartTodoApp() {
     }
   }
 
+  // Abre o modal de detalhes preenchido com os dados atuais da tarefa.
   function handleOpenTaskDetails(task: Task) {
     rememberModalReturnFocus();
     setEditingTask(task);
@@ -1120,6 +1179,7 @@ export function SmartTodoApp() {
     setEditLabel(task.label ?? '');
   }
 
+  // Fecha o modal de detalhes quando não há salvamento em andamento.
   function handleCloseTaskDetails() {
     if (isSavingTaskDetails) {
       return;
@@ -1129,6 +1189,7 @@ export function SmartTodoApp() {
     restoreModalReturnFocus();
   }
 
+  // Salva alterações de título, descrição e etiqueta de uma tarefa.
   async function handleSaveTaskDetails(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
 
@@ -1183,6 +1244,7 @@ export function SmartTodoApp() {
     }
   }
 
+  // Finaliza o arrastar e soltar, persistindo status e ordenação no backend.
   async function handleDragEnd(event: DragEndEvent) {
     const { active, over } = event;
 
@@ -1237,6 +1299,7 @@ export function SmartTodoApp() {
     }
   }
 
+  // Move uma tarefa para outro status por controles alternativos ao arrastar.
   async function handleMoveTaskStatus(task: Task, targetStatus: TaskStatus) {
     if (isReordering || getTaskStatus(task) === targetStatus) {
       return;
@@ -1268,10 +1331,12 @@ export function SmartTodoApp() {
     }
   }
 
+  // Prepara a tarefa selecionada para confirmação de exclusão.
   function handleStartDelete(taskId: string) {
     setConfirmingDeleteId(taskId);
   }
 
+  // Alterna a visualização expandida de uma tarefa na lista.
   function handleToggleExpandedTask(taskId: string) {
     setExpandedTaskIds((current) => {
       const next = new Set(current);
@@ -1286,6 +1351,7 @@ export function SmartTodoApp() {
     });
   }
 
+  // Atualiza o conjunto de tarefas com operação pendente na interface.
   function setPending(id: string, isPending: boolean) {
     setPendingIds((current) => {
       const next = new Set(current);
@@ -1750,6 +1816,7 @@ export function SmartTodoApp() {
   );
 }
 
+// Renderiza a lista compacta de tarefas usada em telas pequenas.
 function MobileTaskList({
   confirmingDeleteId,
   expandedTaskIds,
@@ -1807,6 +1874,7 @@ function MobileTaskList({
   );
 }
 
+// Renderiza um cartão de tarefa otimizado para interação móvel.
 function MobileTaskCard({
   isConfirmingDelete,
   isDisabled,
@@ -2131,6 +2199,7 @@ function MobileTaskCard({
   );
 }
 
+// Renderiza uma raia do quadro Kanban com suporte a soltar tarefas.
 function KanbanLane({
   confirmingDeleteId,
   expandedTaskIds,
@@ -2214,6 +2283,7 @@ function KanbanLane({
   );
 }
 
+// Renderiza um cartão arrastável de tarefa para o quadro Kanban.
 function SortableTaskCard({
   isConfirmingDelete,
   isDisabled,
@@ -2543,6 +2613,7 @@ function SortableTaskCard({
   );
 }
 
+// Controla o modal de geração, edição e confirmação do rascunho de IA.
 function AiDraftModal({
   draft,
   editorError,
@@ -2616,7 +2687,9 @@ function AiDraftModal({
     focusableElement?.focus();
   }, [status]);
 
+  // Prende o foco dentro do modal e permite fechar com Escape.
   useEffect(() => {
+    // Lista os elementos interativos visíveis dentro do modal de rascunho.
     function getFocusableElements() {
       return Array.from(
         dialogRef.current?.querySelectorAll<HTMLElement>(
@@ -2632,6 +2705,7 @@ function AiDraftModal({
       ).filter((element) => element.offsetParent !== null);
     }
 
+    // Controla Escape e Tab para manter a navegação acessível no modal.
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -2750,6 +2824,7 @@ function AiDraftModal({
   );
 }
 
+// Exibe o estado de carregamento enquanto a IA monta o rascunho.
 function AiDraftLoadingState({ onCancel }: { onCancel: () => void }) {
   return (
     <div className="draft-loading-state">
@@ -2788,6 +2863,7 @@ function AiDraftLoadingState({ onCancel }: { onCancel: () => void }) {
   );
 }
 
+// Exibe erro de geração e permite tentar novamente ou cancelar.
 function AiDraftErrorState({
   message,
   onCancel,
@@ -2817,6 +2893,7 @@ function AiDraftErrorState({
   );
 }
 
+// Renderiza o modal usado para criar ou editar uma tarefa manual.
 function TaskFormModal({
   description,
   isSaving,
@@ -2863,11 +2940,14 @@ function TaskFormModal({
     ? tooltipCopy.createTaskDetails
     : tooltipCopy.updateTaskDetails;
 
+  // Foca o campo de título assim que o modal é aberto.
   useEffect(() => {
     titleInputRef.current?.focus();
   }, []);
 
+  // Prende o foco dentro do modal de tarefa e fecha com Escape.
   useEffect(() => {
+    // Lista os controles interativos visíveis dentro do formulário modal.
     function getFocusableElements() {
       return Array.from(
         dialogRef.current?.querySelectorAll<HTMLElement>(
@@ -2883,6 +2963,7 @@ function TaskFormModal({
       ).filter((element) => element.offsetParent !== null);
     }
 
+    // Controla Escape e Tab para manter a navegação acessível no formulário.
     function handleKeyDown(event: KeyboardEvent) {
       if (event.key === 'Escape') {
         event.preventDefault();
@@ -3114,6 +3195,7 @@ function TaskFormModal({
   );
 }
 
+// Renderiza o seletor de tema claro ou escuro.
 function ThemeControl({
   onThemeChange,
   theme,
@@ -3167,6 +3249,7 @@ function ThemeControl({
   );
 }
 
+// Renderiza um cartão de métrica com tooltip e número animado.
 function MetricCard({
   icon,
   label,
@@ -3205,6 +3288,7 @@ function MetricCard({
   );
 }
 
+// Anima mudanças numéricas sem alterar o layout ao redor.
 function AnimatedNumber({
   suffix = '',
   value,
@@ -3220,6 +3304,7 @@ function AnimatedNumber({
   );
 }
 
+// Renderiza uma mensagem vazia com ação opcional para recuperar a lista.
 function EmptyState({
   actionIcon,
   actionLabel,
@@ -3264,6 +3349,7 @@ function EmptyState({
   );
 }
 
+// Renderiza o editor do plano de IA antes da persistência.
 function DraftPlanEditor({
   activeSubtaskCount,
   draft,
@@ -3428,6 +3514,7 @@ function DraftPlanEditor({
   );
 }
 
+// Renderiza os campos editáveis de uma subtarefa do rascunho.
 function DraftSubtaskEditor({
   index,
   isRemoving,
@@ -3518,6 +3605,7 @@ function DraftSubtaskEditor({
   );
 }
 
+// Controla a abertura acessível de tooltips por foco, mouse e teclado.
 function Tooltip({
   children,
   className = '',
@@ -3531,6 +3619,7 @@ function Tooltip({
   const [isOpen, setIsOpen] = useState(false);
   const ignorePointerFocusRef = useRef(false);
 
+  // Evita reabrir o tooltip imediatamente após clique ou toque.
   function handlePointerDown() {
     ignorePointerFocusRef.current = true;
     setIsOpen(false);
@@ -3566,6 +3655,7 @@ function Tooltip({
   );
 }
 
+// Renderiza placeholders enquanto as tarefas carregam.
 function TaskSkeleton() {
   return (
     <div className="skeleton-stack" aria-label="Carregando tarefas">

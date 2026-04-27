@@ -6,6 +6,7 @@ import { THEME_STORAGE_KEY, type Theme } from './theme';
 const themeListeners = new Set<() => void>();
 let themeTransitionTimeout: ReturnType<typeof setTimeout> | null = null;
 
+// Aplica o tema no documento e respeita a preferência de redução de movimento.
 function applyTheme(theme: Theme): void {
   if (typeof document === 'undefined') {
     return;
@@ -37,6 +38,7 @@ function applyTheme(theme: Theme): void {
   }
 }
 
+// Lê o tema atual diretamente do atributo aplicado no HTML.
 function getThemeSnapshot(): Theme {
   if (typeof document === 'undefined') {
     return 'light';
@@ -45,10 +47,12 @@ function getThemeSnapshot(): Theme {
   return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light';
 }
 
+// Fornece o tema padrão durante a renderização no servidor.
 function getThemeServerSnapshot(): Theme {
   return 'light';
 }
 
+// Registra ouvintes para sincronizar mudanças de tema entre componentes.
 function subscribeToTheme(listener: () => void): () => void {
   themeListeners.add(listener);
 
@@ -57,6 +61,7 @@ function subscribeToTheme(listener: () => void): () => void {
   };
 }
 
+// Persiste a preferência de tema no armazenamento local quando possível.
 function storeTheme(theme: Theme): void {
   try {
     window.localStorage.setItem(THEME_STORAGE_KEY, theme);
@@ -65,12 +70,14 @@ function storeTheme(theme: Theme): void {
   }
 }
 
+// Aplica, salva e notifica a nova preferência de tema.
 function setThemePreference(theme: Theme): void {
   applyTheme(theme);
   storeTheme(theme);
   themeListeners.forEach((listener) => listener());
 }
 
+// Expõe o tema atual e uma função estável para alterá-lo.
 export function useThemePreference(): [Theme, (theme: Theme) => void] {
   const theme = useSyncExternalStore(
     subscribeToTheme,

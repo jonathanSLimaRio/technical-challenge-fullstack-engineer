@@ -7,12 +7,15 @@ import type {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? 'http://localhost:3001';
 
+// Define o formato esperado para mensagens de erro devolvidas pela API.
 type ApiErrorPayload = {
   message?: string | string[];
   error?: string;
 };
 
+// Representa uma falha HTTP retornada pela API com seu status.
 export class ApiError extends Error {
+  // Guarda a mensagem amigável e o código HTTP associado à falha.
   constructor(
     message: string,
     readonly status: number,
@@ -22,6 +25,7 @@ export class ApiError extends Error {
   }
 }
 
+// Executa uma requisição JSON contra a API e padroniza erros de resposta.
 async function request<T>(
   path: string,
   options: RequestInit = {},
@@ -45,6 +49,7 @@ async function request<T>(
   return (await response.json()) as T;
 }
 
+// Extrai a melhor mensagem de erro disponível no corpo da resposta.
 async function readErrorMessage(response: Response): Promise<string> {
   try {
     const payload = (await response.json()) as ApiErrorPayload;
@@ -68,10 +73,12 @@ async function readErrorMessage(response: Response): Promise<string> {
   return 'Não foi possível concluir a solicitação.';
 }
 
+// Busca todas as tarefas persistidas na API.
 export function fetchTasks(): Promise<Task[]> {
   return request<Task[]>('/tasks');
 }
 
+// Retorna a origem configurada da API para uso em conexões HTTP e WebSocket.
 export function getApiOrigin(): string {
   try {
     return new URL(API_URL).origin;
@@ -80,12 +87,14 @@ export function getApiOrigin(): string {
   }
 }
 
+// Define os dados aceitos para criar uma tarefa pelo frontend.
 type CreateTaskPayload = {
   description?: string;
   label?: string;
   title: string;
 };
 
+// Cria uma tarefa manual usando título simples ou payload completo.
 export function createTask(payload: CreateTaskPayload | string): Promise<Task> {
   const body = typeof payload === 'string' ? { title: payload } : payload;
 
@@ -95,6 +104,7 @@ export function createTask(payload: CreateTaskPayload | string): Promise<Task> {
   });
 }
 
+// Atualiza campos editáveis ou status de uma tarefa existente.
 export function updateTask(
   id: string,
   payload: {
@@ -111,6 +121,7 @@ export function updateTask(
   });
 }
 
+// Move uma tarefa para outro status e envia a nova ordenação da raia.
 export function moveTask(
   id: string,
   payload: {
@@ -124,12 +135,14 @@ export function moveTask(
   });
 }
 
+// Exclui uma tarefa pelo identificador informado.
 export function deleteTask(id: string): Promise<void> {
   return request<void>(`/tasks/${encodeURIComponent(id)}`, {
     method: 'DELETE',
   });
 }
 
+// Gera tarefas por IA e já retorna a lista persistida pela API.
 export async function generateTasks(goal: string): Promise<Task[]> {
   const response = await request<GenerateTasksResponse>('/tasks/ai-generate', {
     method: 'POST',
@@ -139,6 +152,7 @@ export async function generateTasks(goal: string): Promise<Task[]> {
   return response.tasks;
 }
 
+// Gera um rascunho editável de IA sem persistir tarefas.
 export function previewTasks(
   goal: string,
   options: Pick<RequestInit, 'signal'> = {},
@@ -150,6 +164,7 @@ export function previewTasks(
   });
 }
 
+// Persiste um plano de IA revisado pelo usuário.
 export async function confirmGeneratedTasks(
   plan: AiDraftPlan,
 ): Promise<Task[]> {
