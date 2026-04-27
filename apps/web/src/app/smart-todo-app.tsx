@@ -2486,27 +2486,15 @@ function AiDraftModal({
             {status === 'ready' && draft ? (
               <span>{draft.subtasks.length} subtarefas</span>
             ) : null}
-            <Tooltip
-              className="tooltip-control tooltip-end tooltip-below"
-              content={
-                isLoading
-                  ? 'Cancelar geracao do rascunho.'
-                  : 'Fechar rascunho da IA.'
-              }
+            <button
+              aria-label="Fechar rascunho"
+              className="icon-button neutral"
+              disabled={isSaving}
+              onClick={onCancel}
+              type="button"
             >
-              {(tooltipId) => (
-                <button
-                  aria-describedby={tooltipId}
-                  className="icon-button neutral"
-                  disabled={isSaving}
-                  onClick={onCancel}
-                  type="button"
-                >
-                  <X size={18} aria-hidden="true" />
-                  <span className="sr-only">Fechar rascunho</span>
-                </button>
-              )}
-            </Tooltip>
+              <X size={18} aria-hidden="true" />
+            </button>
           </div>
         </div>
 
