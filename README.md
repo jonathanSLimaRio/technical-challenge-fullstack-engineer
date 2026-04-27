@@ -143,15 +143,15 @@ npm --prefix apps/web run build
 npm run test:e2e
 ```
 
-## Decisions And Trade-Offs
+## Decisões e Trade-Offs
 
-- TypeORM with SQLite was chosen for a fast, idiomatic NestJS implementation with portable persistence. Schema synchronization is opt-in through `TYPEORM_SYNCHRONIZE=true`; production should use explicit migrations.
-- The LLM integration targets Hugging Face Inference Providers through its OpenAI-compatible chat completions router, so compatible providers can still be swapped by changing `LLM_BASE_URL` and `LLM_MODEL`.
-- The AI response is treated as untrusted: the backend requests strict JSON, strips common code fences, validates the shape, deduplicates titles, limits generated tasks, retries transient provider failures once and refuses to persist anything when parsing fails.
-- The main UI previews AI output before persistence so users can edit the story and subtasks, while `POST /tasks/ai-generate` remains available for reviewers and API clients that want the challenge's automatic persist flow.
-- `LLM_PROVIDER=mock` is a deliberate demo and review mode. It proves the AI workflow without requiring secrets, network access or provider credits.
-- Logs use JSON-formatted messages for important events such as task lifecycle changes, AI generation, provider failures, timeouts and invalid AI responses. They avoid API keys, raw prompts and raw provider responses.
-- The provider API key is read from server environment only and is not sent by the browser, stored in SQLite or committed to the repository.
-- Docker Compose includes healthchecks for both services, and the web service waits for a healthy API before starting.
-- The workspace uses `legacy-peer-deps=true` so npm does not install unused vulnerable optional peers such as the `sqlite3` driver; the app uses `better-sqlite3` explicitly.
-- `npm audit --omit=dev` still reports moderate transitive advisories in framework-pinned dependencies (`next -> postcss` and `typeorm -> uuid`). Forcing those fixes currently downgrades major packages, so they are documented rather than overridden unsafely.
+- TypeORM com SQLite foi escolhido para uma implementação NestJS rápida e idiomática, com persistência portável. A sincronização de schema é opcional via `TYPEORM_SYNCHRONIZE=true`; em produção, devem ser usadas migrations explícitas.
+- A integração com LLM usa Hugging Face Inference Providers por meio do roteador de chat completions compatível com OpenAI, então provedores compatíveis ainda podem ser trocados alterando `LLM_BASE_URL` e `LLM_MODEL`.
+- A resposta da IA é tratada como não confiável: o backend solicita JSON estrito, remove code fences comuns, valida o formato, deduplica títulos, limita tarefas geradas, tenta novamente uma vez em falhas transitórias do provedor e se recusa a persistir qualquer dado quando o parsing falha.
+- A UI principal exibe uma prévia da saída da IA antes da persistência para que usuários possam editar a história e as subtarefas, enquanto `POST /tasks/ai-generate` continua disponível para avaliadores e clientes de API que queiram o fluxo de persistência automática do desafio.
+- `LLM_PROVIDER=mock` é um modo deliberado de demonstração e revisão. Ele comprova o fluxo de IA sem exigir secrets, acesso à rede ou créditos de provedor.
+- Os logs usam mensagens em formato JSON para eventos importantes, como mudanças no ciclo de vida de tarefas, geração por IA, falhas de provedor, timeouts e respostas inválidas da IA. Eles evitam chaves de API, prompts brutos e respostas brutas do provedor.
+- A chave de API do provedor é lida apenas do ambiente do servidor e não é enviada pelo navegador, armazenada no SQLite nem commitada no repositório.
+- O Docker Compose inclui healthchecks para os dois serviços, e o serviço web aguarda uma API saudável antes de iniciar.
+- O workspace usa `legacy-peer-deps=true` para que o npm não instale peers opcionais vulneráveis e não usados, como o driver `sqlite3`; a aplicação usa `better-sqlite3` explicitamente.
+- `npm audit --omit=dev` ainda reporta advisories transitivos moderados em dependências fixadas pelos frameworks (`next -> postcss` e `typeorm -> uuid`). Forçar essas correções atualmente faz downgrade de pacotes major, então elas são documentadas em vez de sobrescritas de forma insegura.
