@@ -13,27 +13,54 @@ The app lets users manage tasks manually and ask a Hugging Face-hosted LLM to br
 
 ## For Reviewers
 
-Run the complete stack in one command:
+The fastest path is Docker Compose. From a fresh clone:
 
 ```bash
+git clone <repository-url>
+cd technical-challenge-fullstack-engineer
 cp .env.example .env
+```
+
+Open `.env` and choose one AI mode:
+
+```bash
+# Real Hugging Face integration
+LLM_PROVIDER=huggingface
+LLM_API_KEY=hf_your_real_token_here
+```
+
+The token must have access to Hugging Face Inference Providers. If you only
+want to review the product flow without an external provider, use mock mode:
+
+```bash
+LLM_PROVIDER=mock
+LLM_API_KEY=
+```
+
+Then start the full stack:
+
+```bash
 docker compose up --build
 ```
 
-Then open `http://localhost:3000`. The API healthcheck is available at
-`http://localhost:3001/health` and Swagger is available at
-`http://localhost:3001/docs` in non-production mode.
+When both containers are healthy, open:
 
-To review the AI flow without a real API key, set `LLM_PROVIDER=mock` in `.env`.
-The mock provider returns deterministic tasks, which makes
-the app easy to demo and keeps E2E tests independent of external LLM services.
+- Web app: http://localhost:3000
+- API healthcheck: http://localhost:3001/health
+- Swagger: http://localhost:3001/docs
 
-To review real LLM integration, keep `LLM_PROVIDER=huggingface`, set
-`LLM_API_KEY` in `.env`, and use the Hugging Face defaults included in
-`.env.example`.
+Manual task management works as soon as Docker is running. AI generation works
+with either a valid Hugging Face key or `LLM_PROVIDER=mock`.
+
+Useful review checks:
+
+```bash
+docker compose ps
+curl http://localhost:3001/health
+```
 
 Open the app in two browser tabs to see task changes sync through WebSocket
-events. Useful quality commands:
+events. Useful quality commands outside Docker:
 
 ```bash
 npm --prefix apps/api test
@@ -50,19 +77,41 @@ schema synchronization disabled unless `TYPEORM_SYNCHRONIZE=true`.
 
 ## Running With Docker
 
+Prerequisites: Docker Desktop or Docker Engine with Compose, and ports `3000`
+and `3001` available.
+
 ```bash
 cp .env.example .env
 docker compose up --build
 ```
 
-Then open:
+The compose file reads `.env` automatically and starts:
 
 - Web app: http://localhost:3000
 - API: http://localhost:3001
 - Swagger: http://localhost:3001/docs
 
-The compose file reads `.env` automatically. For real AI generation, fill
-`LLM_API_KEY` in `.env`; for a no-key demo, set `LLM_PROVIDER=mock`.
+For real AI generation, fill `LLM_API_KEY` in `.env` and keep
+`LLM_PROVIDER=huggingface`. For a no-key demo, set `LLM_PROVIDER=mock`.
+
+To confirm the stack is ready:
+
+```bash
+docker compose ps
+curl http://localhost:3001/health
+```
+
+To stop the containers:
+
+```bash
+docker compose down
+```
+
+To also remove the local SQLite Docker volume and start with an empty database:
+
+```bash
+docker compose down -v
+```
 
 ## Running Locally
 
