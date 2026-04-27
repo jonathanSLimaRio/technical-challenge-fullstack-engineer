@@ -585,6 +585,7 @@ export function SmartTodoApp() {
       total: tasks.length,
     };
   }, [tasks]);
+  const hasProviderApiKey = providerApiKey.trim().length > 0;
 
   const rootTasks = useMemo(() => getRootTasks(tasks), [tasks]);
   const tasksByParent = useMemo(() => getTasksByParent(tasks), [tasks]);
@@ -1411,15 +1412,34 @@ export function SmartTodoApp() {
 
             <form className="form-grid" onSubmit={handleGenerateTasks}>
               <div className="field-group">
-                <label htmlFor="provider-api-key">
-                  Chave da API do provedor
-                </label>
+                <div className="label-row">
+                  <label htmlFor="provider-api-key">
+                    Chave da API do provedor
+                  </label>
+                  <span
+                    aria-live="polite"
+                    className={
+                      hasProviderApiKey ? 'key-status active' : 'key-status'
+                    }
+                  >
+                    {hasProviderApiKey ? (
+                      <CheckCircle2 size={14} aria-hidden="true" />
+                    ) : (
+                      <KeyRound size={14} aria-hidden="true" />
+                    )}
+                    {hasProviderApiKey ? 'Chave adicionada' : 'Chave opcional'}
+                  </span>
+                </div>
                 <Tooltip
                   className="tooltip-fill"
                   content={tooltipCopy.providerApiKey}
                 >
                   {(tooltipId) => (
-                    <span className="key-field">
+                    <span
+                      className={
+                        hasProviderApiKey ? 'key-field has-key' : 'key-field'
+                      }
+                    >
                       <KeyRound size={17} aria-hidden="true" />
                       <input
                         aria-describedby={describedBy(
@@ -1437,12 +1457,35 @@ export function SmartTodoApp() {
                         type="password"
                         value={providerApiKey}
                       />
+                      {hasProviderApiKey ? (
+                        <button
+                          aria-label="Remover chave da API do provedor"
+                          className="key-clear-button"
+                          onClick={() => setProviderApiKey('')}
+                          type="button"
+                        >
+                          <X size={15} aria-hidden="true" />
+                        </button>
+                      ) : null}
                     </span>
                   )}
                 </Tooltip>
-                <p className="field-hint secure" id="provider-api-key-helper">
-                  <KeyRound size={14} aria-hidden="true" />
-                  Enviada apenas nesta solicitacao; nao sera salva no navegador.
+                <p
+                  className={
+                    hasProviderApiKey
+                      ? 'field-hint secure active'
+                      : 'field-hint secure'
+                  }
+                  id="provider-api-key-helper"
+                >
+                  {hasProviderApiKey ? (
+                    <CheckCircle2 size={14} aria-hidden="true" />
+                  ) : (
+                    <KeyRound size={14} aria-hidden="true" />
+                  )}
+                  {hasProviderApiKey
+                    ? 'Pronta para esta geracao. A chave nao sera salva no navegador.'
+                    : 'Se ficar vazio, a API usara a chave configurada no servidor.'}
                 </p>
               </div>
 

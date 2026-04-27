@@ -676,11 +676,37 @@ button:focus-visible,
   color: var(--text-secure);
 }
 
-.key-field {
-  position: relative;
+.field-hint.secure.active {
+  color: var(--green-text-strong);
 }
 
-.key-field svg {
+.key-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  min-height: 24px;
+  padding: 3px 8px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: var(--surface-muted);
+  color: var(--muted);
+  font-size: 0.72rem;
+  font-weight: 760;
+  white-space: nowrap;
+}
+
+.key-status.active {
+  border-color: var(--green-border-strong);
+  background: var(--green-soft);
+  color: var(--green-text-strong);
+}
+
+.key-field {
+  position: relative;
+  display: block;
+}
+
+.key-field > svg {
   position: absolute;
   top: 50%;
   left: 13px;
@@ -688,8 +714,49 @@ button:focus-visible,
   transform: translateY(-50%);
 }
 
+.key-field.has-key > svg {
+  color: var(--green);
+}
+
 .key-field input {
   padding-left: 42px;
+  padding-right: 13px;
+}
+
+.key-field.has-key input {
+  border-color: var(--green-border-strong);
+  background:
+    linear-gradient(0deg, rgba(5, 150, 105, 0.05), rgba(5, 150, 105, 0.05)),
+    var(--surface-input);
+  padding-right: 44px;
+}
+
+.key-clear-button {
+  position: absolute;
+  top: 50%;
+  right: 8px;
+  display: inline-flex;
+  width: 30px;
+  height: 30px;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  border-radius: 999px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  transform: translateY(-50%);
+  transition:
+    background 160ms ease,
+    border-color 160ms ease,
+    color 160ms ease;
+}
+
+.key-clear-button:hover,
+.key-clear-button:focus-visible {
+  border-color: var(--line);
+  background: var(--surface-hover);
+  color: var(--text);
 }
 
 .button,
